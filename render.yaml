@@ -1,0 +1,28 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One web service runs everything: it serves the built client and holds the socket
+# connections. There is no database, no worker and no cron, because the game keeps its
+# state in memory for the life of a match and nothing needs to outlive that.
+services:
+  - type: web
+    name: number-hunt
+    runtime: node
+    plan: free
+    # Closest Render region to India. Change it to whatever is nearest your players —
+    # this is a reflex game, so round-trip time is the thing worth optimising.
+    region: singapore
+
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+
+    # Render restarts the service if this stops answering.
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # PORT is injected by Render and read by the server — don't set it here.
+      #
+      # Nothing else is required. The game has no database, no API keys and no secrets.
+      # ALLOWED_ORIGIN only matters if you ever serve the client from a different domain
+      # than the socket server; same-origin (the default) needs no CORS at all.

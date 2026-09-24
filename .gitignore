@@ -1,0 +1,9 @@
+node_modules/
+dist/
+
+# Local config. .env.example is the documented, committed one.
+.env
+.env.local
+*.log
+.DS_Store
+.vite/
