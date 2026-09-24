@@ -62,6 +62,9 @@ interface AppState {
 }
 
 let toastSeq = 0;
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+/** How long a dismissible banner sticks around before clearing itself. */
+const NOTICE_MS = 9000;
 
 export const useStore = create<AppState>()((set, get) => ({
   connected: false,
@@ -104,7 +107,16 @@ export const useStore = create<AppState>()((set, get) => ({
   removeToken: (tokenId) =>
     set((s) => ({ tokens: s.tokens.filter((t) => t.id !== tokenId) })),
   setHasLeft: (hasLeft) => set({ hasLeft }),
-  setNotice: (notice) => set({ notice }),
+  setNotice: (notice) => {
+    // Clears itself after a read's worth of time; the × is for dismissing it sooner.
+    clearTimeout(noticeTimer);
+    if (notice) {
+      noticeTimer = setTimeout(() => {
+        if (get().notice === notice) set({ notice: null });
+      }, NOTICE_MS);
+    }
+    set({ notice });
+  },
   bumpStreak: () => set((s) => ({ streak: s.streak + 1 })),
   resetStreak: () => set({ streak: 0 }),
   setPuzzle: (puzzle) => set({ puzzle }),
@@ -112,6 +124,9 @@ export const useStore = create<AppState>()((set, get) => ({
   lockBoard: (ms) => set({ lockedUntil: Date.now() + ms }),
   setGameOver: (gameOver) => set({ gameOver }),
   pushToast: (text, tone = 'info') => {
+    // One rejected action can fire many times — a slider drag sends a change per tick —
+    // and stacking twenty copies of the same message helps nobody.
+    if (get().toasts.some((t) => t.text === text)) return;
     const id = ++toastSeq;
     set((s) => ({ toasts: [...s.toasts, { id, text, tone }] }));
     setTimeout(() => get().dropToast(id), 2600);

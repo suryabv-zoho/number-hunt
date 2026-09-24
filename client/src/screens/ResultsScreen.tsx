@@ -31,9 +31,9 @@ import { acceptRematch, closeRoom, leaveRoom, playAgain } from '../socket.js';
 
 // Gold gets the trophy; silver and bronze get medals.
 const PODIUM = [
-  { icon: iconTrophy, cls: 'text-[#f4b740]' },
-  { icon: iconMedal, cls: 'text-[#c6ccd8]' },
-  { icon: iconMedal, cls: 'text-[#cd8c5c]' },
+  { icon: iconTrophy, cls: 'text-[#f2b705]' },
+  { icon: iconMedal, cls: 'text-[#9aa0b4]' },
+  { icon: iconMedal, cls: 'text-[#c07a42]' },
 ];
 
 const END_TITLE = {
@@ -61,16 +61,16 @@ export default function ResultsScreen() {
 
   return (
     <div className="flex flex-1 items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-5">
-      <Card className="animate-rise my-auto w-full max-w-[40rem] border-border bg-card">
+      <Card className="card-shadow animate-rise my-auto w-full max-w-[40rem] rounded-xl border-border bg-card">
         <CardContent className="space-y-4 pt-1 sm:space-y-5">
           <div className="space-y-1.5 text-center">
             <FontAwesomeIcon
               icon={reason === 'board_cleared' ? iconTrophy : iconClock}
-              className="text-2xl text-primary sm:text-3xl"
+              className="text-3xl text-primary sm:text-4xl"
             />
-            <h1 className="text-xl font-bold sm:text-2xl">{END_TITLE[reason]}</h1>
+            <h1 className="text-2xl font-extrabold sm:text-3xl">{END_TITLE[reason]}</h1>
             {winner && (
-              <p className="text-sm text-muted-foreground sm:text-base">
+              <p className="text-base text-muted-foreground">
                 <b className="text-foreground">{winner.name}</b> takes it with{' '}
                 <b className="text-primary tnum">{winner.score}</b> points
               </p>
@@ -95,7 +95,7 @@ export default function ResultsScreen() {
                   <TableRow
                     key={r.playerId}
                     className={cn(
-                      r.playerId === playerId && 'bg-primary/5',
+                      r.playerId === playerId && 'bg-surface',
                       r.left && 'opacity-60',
                     )}
                   >
@@ -111,7 +111,7 @@ export default function ResultsScreen() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-medium">{r.name}</span>
+                        <span className="text-base font-bold">{r.name}</span>
                         {r.left && (
                           <Badge
                             variant="secondary"
@@ -125,7 +125,7 @@ export default function ResultsScreen() {
                     </TableCell>
                     <TableCell
                       className={cn(
-                        'text-right text-base font-bold tnum',
+                        'text-right text-lg font-extrabold tnum',
                         r.score < 0 ? 'text-destructive' : 'text-primary',
                       )}
                     >
@@ -152,9 +152,9 @@ export default function ResultsScreen() {
           </div>
 
           {/* Another match in this same room needs the room's own people to agree. */}
-          <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
+          <div className="space-y-3 rounded-lg bg-surface p-4">
             <div className="flex items-center justify-between gap-2 text-sm">
-              <span className="flex items-center gap-2 text-muted-foreground">
+              <span className="flex items-center gap-2 font-bold text-muted-foreground">
                 <FontAwesomeIcon icon={iconPlayers} />
                 Play again in this room?
               </span>
@@ -167,14 +167,14 @@ export default function ResultsScreen() {
               <>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
-                    className="h-10 flex-1 font-semibold"
+                    className="h-12 flex-1 text-base font-extrabold"
                     disabled={!canRestart}
                     onClick={playAgain}
                   >
                     <FontAwesomeIcon icon={iconReplay} />
                     {canRestart ? 'Back to lobby' : 'Waiting for someone to accept'}
                   </Button>
-                  <Button variant="destructive" className="h-10" onClick={closeRoom}>
+                  <Button variant="destructive" className="h-12 text-base font-extrabold" onClick={closeRoom}>
                     <FontAwesomeIcon icon={iconClose} />
                     Close room
                   </Button>
@@ -188,7 +188,7 @@ export default function ResultsScreen() {
               <>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Button
-                    className="h-10 flex-1 font-semibold"
+                    className="h-12 flex-1 text-base font-extrabold"
                     variant={iAccepted ? 'secondary' : 'default'}
                     onClick={acceptRematch}
                     disabled={iAccepted}
@@ -196,7 +196,7 @@ export default function ResultsScreen() {
                     <FontAwesomeIcon icon={iconAccept} />
                     {iAccepted ? "You're in — waiting for the host" : 'Yes, deal me in'}
                   </Button>
-                  <Button variant="ghost" className="h-10" onClick={leaveRoom}>
+                  <Button variant="ghost" className="h-12 text-base font-extrabold" onClick={leaveRoom}>
                     <FontAwesomeIcon icon={iconLeave} />
                     Exit room
                   </Button>

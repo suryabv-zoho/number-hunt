@@ -13,23 +13,24 @@ const MIN_VALUE = 10;
 const MAX_VALUE = 999;
 
 /**
- * Warm tones plus violet and periwinkle, and deliberately no teal or green: those are
- * the interface's own colours, so the hover highlight and the UI never read as "a number".
- * All held to a similar lightness, so no single number jumps out of the crowd.
+ * Numbers sit on a dark board, so these are light — but deliberately not neon. Fully
+ * saturated brights on a dark field shimmer and tire the eyes over a long match, so
+ * every one of these is pulled back toward pastel and held to a similar lightness, and
+ * kept clear of the interface's violet so the UI never reads as "a number".
  */
 export const PALETTE = [
-  '#f4b740',
-  '#ef6f52',
-  '#e8618c',
-  '#b98bf0',
-  '#7aa5ff',
-  '#f08a4b',
-  '#d7d05f',
-  '#9fb8ff',
-  '#ff9ba8',
-  '#c9a0ff',
-  '#8fc4ff',
-  '#e9a06a',
+  '#f0c05a',
+  '#ef8f6b',
+  '#e88bc4',
+  '#b0d47a',
+  '#7fb4e8',
+  '#6fc9a2',
+  '#e0a15c',
+  '#88c9d8',
+  '#e496a4',
+  '#c49ae0',
+  '#6cbfc4',
+  '#cfc07a',
 ];
 
 /**

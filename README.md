@@ -67,10 +67,23 @@ client/   vite + react 19, tailwind v4 and shadcn/ui components, Font Awesome ic
           The board is a <canvas>; puzzles use dnd-kit.
 ```
 
-The interface is dark-only by design: charcoal surfaces, hairline borders and a single
-amber accent that carries every call to action, with the board palette deliberately held
-to one lightness so no number is easier to spot than another. All the colour lives in CSS
-variables at the top of `client/src/index.css`.
+The interface is dark, rounded and purple-forward, with Nunito throughout. All the
+colour lives in CSS variables at the top of `client/src/index.css` — a brand/accent/mint/
+danger/ink ramp, plus the semantic tokens shadcn reads.
+
+Dark is a deliberate choice rather than a preference: a match runs fifteen minutes of
+close visual scanning, and a bright board is tiring over that long. For the same reason
+nothing here is pure white or fully saturated — text is a soft lavender, and the board's
+numbers are pulled back toward pastel.
+
+One thing to watch when editing it: a palette step used in a utility class (`bg-accent-500`)
+must also be exported under `@theme inline` as `--color-accent-500`, or Tailwind silently
+drops the class and you get an invisible element rather than an error.
+
+The board carries **its own palette** (`shared/src/board.ts`), light enough to read on
+the dark playfield but deliberately not neon — saturated brights shimmer against dark and
+tire the eyes. Every tone is held to a similar lightness so no number is easier to spot
+than another, and all of them stay clear of the interface's violet.
 
 The server is authoritative for everything that matters: it owns the board, decides whose
 turn it is, hit-tests every click against the token geometry, and validates every puzzle
@@ -146,7 +159,12 @@ snapshot — it's what's left, at roughly 90 bytes per player.
 - **Phones and tablets.** Every player gets the same fixed board, which is what keeps the
   race fair, so a small screen zooms rather than getting a different layout. Narrow screens
   open zoomed in to fill the view; pinch or use the buttons to zoom, drag to look around,
-  and the reset button puts it back.
+  and the reset button puts it back. Touch gets a far more forgiving tap threshold than a
+  mouse (a finger always slides), and lifting off a pinch is deliberately never treated as
+  a tap on a number.
+- **Only the caller sees the board while a number is being chosen.** Everyone else gets a
+  waiting screen. That keeps the start of the hunt fair — nobody can pre-scan — and makes
+  it obvious whose turn it is.
 - **No database.** Rooms live in a `Map` and are reclaimed once everyone has been gone a
   while. Restarting the server drops every match in progress.
 

@@ -65,11 +65,13 @@ export default function GameScreen() {
         body="Waiting for players to come back…"
       />
     );
+  } else if (room.phase === 'await_call' && !isCaller) {
+    // Only the caller needs the board right now. Everyone else gets a proper waiting
+    // screen rather than a board they can't act on — it also stops them pre-scanning,
+    // so the hunt starts fairly for everybody at the moment the number is called.
+    main = <WaitingForCall />;
   } else {
-    // Both phases put you in front of the board: the caller to choose a number,
-    // everyone else to hunt the one that was called.
-    const mode: BoardMode =
-      room.phase === 'await_call' ? (isCaller ? 'pick' : 'idle') : 'hunt';
+    const mode: BoardMode = room.phase === 'await_call' ? 'pick' : 'hunt';
     main = (
       <>
         <StatusStrip />
@@ -92,6 +94,43 @@ export default function GameScreen() {
   );
 }
 
+/** What everyone but the caller sees while a number is being chosen. */
+function WaitingForCall() {
+  const room = useStore((s) => s.room)!;
+  const phaseLeftMs = useStore((s) => s.phaseLeftMs);
+  const caller = room.players.find((p) => p.id === room.currentCallerId);
+
+  return (
+    <div className="card-shadow relative flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-hidden rounded-xl border border-border bg-card p-6 text-center">
+      <div className="sweep pointer-events-none absolute inset-0" />
+
+      <div className="animate-breathe grid size-20 place-items-center rounded-full bg-surface sm:size-24">
+        <FontAwesomeIcon icon={iconCall} className="text-3xl text-primary sm:text-4xl" />
+      </div>
+
+      <div className="space-y-1.5">
+        <h2 className="text-2xl font-extrabold sm:text-3xl">
+          {caller?.name ?? 'Someone'} is choosing
+        </h2>
+        <p className="text-base text-muted-foreground">
+          Get ready — the number lands in a moment.
+        </p>
+      </div>
+
+      <div className="rounded-full bg-surface px-5 py-2 text-lg font-extrabold text-primary tnum">
+        {formatClock(phaseLeftMs)}
+      </div>
+
+      {room.lastReveal && (
+        <p className="text-sm text-muted-foreground">
+          Last round's number was{' '}
+          <b className="text-foreground tnum">{room.lastReveal.value}</b>
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Notice({
   icon,
   title,
@@ -104,11 +143,17 @@ function Notice({
   sub?: string;
 }) {
   return (
-    <div className="animate-pop flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card p-5 text-center sm:p-6">
-      <FontAwesomeIcon icon={icon} className="mb-1 text-2xl text-primary sm:text-3xl" />
-      <h2 className="text-xl font-semibold sm:text-2xl">{title}</h2>
-      <p className="max-w-[28rem] text-sm text-muted-foreground sm:text-base">{body}</p>
-      {sub && <div className="font-bold text-primary tnum">{sub}</div>}
+    <div className="card-shadow animate-pop flex min-h-0 flex-1 flex-col items-center justify-center gap-4 rounded-xl border border-border bg-card p-6 text-center">
+      <div className="grid size-20 place-items-center rounded-full bg-surface sm:size-24">
+        <FontAwesomeIcon icon={icon} className="text-3xl text-primary sm:text-4xl" />
+      </div>
+      <h2 className="text-2xl font-extrabold sm:text-3xl">{title}</h2>
+      <p className="max-w-[28rem] text-base text-muted-foreground">{body}</p>
+      {sub && (
+        <div className="rounded-full bg-surface px-5 py-2 text-lg font-extrabold text-primary tnum">
+          {sub}
+        </div>
+      )}
     </div>
   );
 }

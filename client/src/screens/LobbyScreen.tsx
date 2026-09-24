@@ -35,7 +35,14 @@ export default function LobbyScreen() {
 
   // Send just the delta; the server merges it. Sending a whole snapshot would let
   // two quick changes race, with the slower one reverting the faster one.
-  const patch = (p: Partial<RoomConfig>) => sendConfig(p);
+  //
+  // The host guard here is not belt-and-braces: `fieldset[disabled]` only disables real
+  // form controls, and a Radix Slider is built from divs, so without this a non-host
+  // could drag it and fire a rejected config change on every single tick.
+  const patch = (p: Partial<RoomConfig>) => {
+    if (!isHost) return;
+    sendConfig(p);
+  };
 
   function copyCode() {
     navigator.clipboard?.writeText(room.code);
@@ -45,7 +52,7 @@ export default function LobbyScreen() {
 
   return (
     <div className="flex flex-1 items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-5">
-      <Card className="animate-rise my-auto w-full max-w-[34rem] border-border bg-card">
+      <Card className="card-shadow animate-rise my-auto w-full max-w-[34rem] rounded-xl border-border bg-card">
         <CardContent className="space-y-5 pt-1 sm:space-y-6">
           <div className="flex items-start justify-between">
             <div>
@@ -54,7 +61,7 @@ export default function LobbyScreen() {
               </div>
               <button
                 onClick={copyCode}
-                className="group flex items-center gap-2 text-[1.9rem] leading-none font-extrabold tracking-[0.25em] text-primary transition-opacity hover:opacity-80 sm:gap-3 sm:text-[2.4rem] sm:tracking-[0.3em]"
+                className="group flex items-center gap-2 text-[2.2rem] leading-none font-extrabold tracking-[0.25em] text-primary transition-opacity hover:opacity-80 sm:gap-3 sm:text-[2.6rem] sm:tracking-[0.3em]"
               >
                 {room.code}
                 <FontAwesomeIcon
@@ -96,21 +103,21 @@ export default function LobbyScreen() {
               {room.players.map((p, i) => (
                 <li
                   key={p.id}
-                  className={`flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 transition-opacity ${
+                  className={`flex items-center gap-3 rounded-lg bg-surface px-3.5 py-3 transition-opacity ${
                     p.connected ? '' : 'opacity-50'
                   }`}
                 >
-                  <span className="grid size-6 place-items-center rounded-full bg-surface-2 text-xs text-muted-foreground tnum">
+                  <span className="grid size-7 place-items-center rounded-full bg-surface-2 text-sm font-extrabold text-primary tnum">
                     {i + 1}
                   </span>
-                  <span className="flex-1 text-sm font-medium">
+                  <span className="flex-1 text-base font-bold">
                     {p.name}
                     {p.id === playerId && (
                       <span className="ml-1.5 font-normal text-muted-foreground">(you)</span>
                     )}
                   </span>
                   {p.isHost && (
-                    <Badge className="gap-1.5 bg-primary/15 text-primary hover:bg-primary/15">
+                    <Badge className="gap-1.5 bg-accent-500 text-brand-900 hover:bg-accent-500">
                       <FontAwesomeIcon icon={iconHost} className="text-[0.65rem]" />
                       Host
                     </Badge>
@@ -136,12 +143,13 @@ export default function LobbyScreen() {
             <fieldset disabled={!isHost} className="space-y-4 disabled:opacity-60">
               <div className="space-y-2">
                 <div className="flex items-baseline justify-between text-sm">
-                  <span className="text-muted-foreground">Numbers on the board</span>
-                  <span className="font-semibold text-primary tnum">
+                  <span className="text-base font-bold text-muted-foreground">Numbers on the board</span>
+                  <span className="text-lg font-extrabold text-primary tnum">
                     {room.config.numberCount}
                   </span>
                 </div>
                 <Slider
+                  disabled={!isHost}
                   min={20}
                   max={150}
                   step={5}
@@ -152,10 +160,11 @@ export default function LobbyScreen() {
 
               <ConfigRow label="Match length">
                 <Select
+                  disabled={!isHost}
                   value={String(room.config.matchMinutes)}
                   onValueChange={(v: string) => patch({ matchMinutes: Number(v) })}
                 >
-                  <SelectTrigger className="w-full sm:w-[11rem]">
+                  <SelectTrigger className="h-12 w-full text-base sm:w-[12rem]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -169,10 +178,11 @@ export default function LobbyScreen() {
 
               <ConfigRow label="Time to find a number">
                 <Select
+                  disabled={!isHost}
                   value={String(room.config.findSeconds)}
                   onValueChange={(v: string) => patch({ findSeconds: Number(v) })}
                 >
-                  <SelectTrigger className="w-full sm:w-[11rem]">
+                  <SelectTrigger className="h-12 w-full text-base sm:w-[12rem]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -186,10 +196,11 @@ export default function LobbyScreen() {
 
               <ConfigRow label="Puzzle size">
                 <Select
+                  disabled={!isHost}
                   value={String(room.config.puzzleLength)}
                   onValueChange={(v: string) => patch({ puzzleLength: Number(v) })}
                 >
-                  <SelectTrigger className="w-full sm:w-[11rem]">
+                  <SelectTrigger className="h-12 w-full text-base sm:w-[12rem]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -202,12 +213,13 @@ export default function LobbyScreen() {
 
               <ConfigRow label="Puzzle characters">
                 <Select
+                  disabled={!isHost}
                   value={room.config.puzzleCharset}
                   onValueChange={(v: string) =>
                     patch({ puzzleCharset: v as RoomConfig['puzzleCharset'] })
                   }
                 >
-                  <SelectTrigger className="w-full sm:w-[11rem]">
+                  <SelectTrigger className="h-12 w-full text-base sm:w-[12rem]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -224,7 +236,7 @@ export default function LobbyScreen() {
 
           {isHost ? (
             <Button
-              className="h-11 w-full text-base font-semibold"
+              className="h-13 w-full text-lg font-extrabold"
               disabled={!ready}
               onClick={startMatch}
             >
@@ -245,7 +257,7 @@ export default function LobbyScreen() {
 function ConfigRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-base font-bold text-muted-foreground">{label}</span>
       {children}
     </div>
   );

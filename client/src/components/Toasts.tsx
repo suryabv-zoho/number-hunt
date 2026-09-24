@@ -4,9 +4,9 @@ import { iconFound, iconInfo, iconWrong } from '@/icons';
 import { useStore } from '../store.js';
 
 const TONE = {
-  good: { cls: 'border-success/50 text-success', icon: iconFound },
-  bad: { cls: 'border-destructive/50 text-destructive', icon: iconWrong },
-  info: { cls: 'border-border text-foreground', icon: iconInfo },
+  good: { cls: 'bg-mint-100 text-success', icon: iconFound },
+  bad: { cls: 'bg-danger-100 text-destructive', icon: iconWrong },
+  info: { cls: 'bg-brand-100 text-foreground', icon: iconInfo },
 } as const;
 
 export default function Toasts() {
@@ -19,7 +19,7 @@ export default function Toasts() {
           <div
             key={t.id}
             className={cn(
-              'animate-pop flex items-center gap-2.5 rounded-full border bg-popover px-4 py-2 text-sm font-medium shadow-xl shadow-black/40',
+              'animate-pop card-shadow flex items-center gap-2.5 rounded-full px-5 py-2.5 text-base font-extrabold',
               tone.cls,
             )}
           >

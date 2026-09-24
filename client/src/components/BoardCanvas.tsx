@@ -9,8 +9,13 @@ import { iconZoomIn, iconZoomOut, iconFit } from '@/icons';
 const REVEAL_MS = 3200;
 const DEAL_MS = 700;
 const MAX_ZOOM = 6;
-/** A pointer that moves further than this was a drag, not a tap. */
-const TAP_SLOP_PX = 8;
+/**
+ * How far a pointer may travel and still count as a tap rather than a drag.
+ * A finger always slides a little, so touch gets a much bigger allowance than a mouse —
+ * 8px was tight enough that real taps were being swallowed as pans.
+ */
+const TAP_SLOP_MOUSE = 6;
+const TAP_SLOP_TOUCH = 16;
 
 export type BoardMode = 'pick' | 'hunt' | 'idle';
 
@@ -79,12 +84,16 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   // those would otherwise repaint the board. Coalesce them into one frame.
   const pendingView = useRef<View | null>(null);
   const panRaf = useRef(0);
+  /** Set while a pinch is in progress and for a moment after, so the finger lifting
+   *  off a two-finger gesture never lands as a tap on a number. */
+  const pinchUntil = useRef(0);
   const gesture = useRef<{
     startX: number;
     startY: number;
     moved: number;
     startView: View;
     pinchDist: number;
+    slop: number;
   } | null>(null);
 
   useEffect(() => {
@@ -224,19 +233,19 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size.w, size.h);
-      ctx.fillStyle = '#0d1013';
+      ctx.fillStyle = '#131029';
       ctx.fillRect(0, 0, size.w, size.h);
 
       ctx.save();
       ctx.translate(offX, offY);
       ctx.scale(scale, scale);
 
-      // Board surface with a faint grid so it reads as a playfield, not a void.
-      ctx.fillStyle = '#121620';
+      // Board surface, lifted just enough off the page to read as a playfield.
+      ctx.fillStyle = '#1a1638';
       ctx.fillRect(0, 0, BOARD_W, BOARD_H);
 
       // One path for every grid line, and only the lines in view.
-      ctx.strokeStyle = 'rgba(255,255,255,0.022)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.045)';
       ctx.lineWidth = 1 / scale;
       ctx.beginPath();
       const gx0 = Math.max(100, Math.floor(viewL / 100) * 100);
@@ -257,7 +266,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      const alpha = locked ? 0.35 : 1;
+      const alpha = locked ? 0.3 : 1;
       let hoveredToken: NumberToken | null = null;
 
       for (let i = 0; i < tokens.length; i++) {
@@ -286,7 +295,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
         ctx.rotate((t.rotation * Math.PI) / 180);
         if (dealing) ctx.scale(0.8 + 0.2 * eased, 0.8 + 0.2 * eased);
         ctx.globalAlpha = alpha * eased;
-        ctx.font = `700 ${t.fontSize}px Inter, "Segoe UI", system-ui, sans-serif`;
+        ctx.font = `800 ${t.fontSize}px Nunito, ui-rounded, "Segoe UI", system-ui, sans-serif`;
         ctx.fillStyle = t.color;
         ctx.fillText(String(t.value), 0, 0);
         ctx.restore();
@@ -294,15 +303,23 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
 
       if (hoveredToken) {
         const t = hoveredToken;
+        const label = String(t.value);
         ctx.save();
         ctx.translate(t.x, t.y);
         ctx.rotate((t.rotation * Math.PI) / 180);
-        ctx.font = `700 ${t.fontSize}px Inter, "Segoe UI", system-ui, sans-serif`;
-        // Picking is a deliberate choice, so make the target unmistakable.
-        ctx.shadowColor = t.color;
-        ctx.shadowBlur = 22;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(String(t.value), 0, 0);
+        ctx.font = `800 ${t.fontSize}px Nunito, ui-rounded, "Segoe UI", system-ui, sans-serif`;
+        // Picking is deliberate, so make the target unmistakable — a filled brand pill
+        // behind it, since a glow does nothing on a pale surface.
+        const w = ctx.measureText(label).width;
+        const padX = t.fontSize * 0.32;
+        const padY = t.fontSize * 0.28;
+        const r = t.fontSize * 0.45;
+        ctx.beginPath();
+        ctx.roundRect(-w / 2 - padX, -t.fontSize / 2 - padY, w + padX * 2, t.fontSize + padY * 2, r);
+        ctx.fillStyle = '#8466ff';
+        ctx.fill();
+        ctx.fillStyle = '#140f30';
+        ctx.fillText(label, 0, 0);
         ctx.restore();
       }
 
@@ -316,13 +333,13 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
           const p = age / REVEAL_MS;
           ctx.save();
           ctx.globalAlpha = Math.max(0, 1 - p);
-          ctx.strokeStyle = '#2dd4bf';
-          ctx.lineWidth = 5;
+          ctx.strokeStyle = '#ffc94d';
+          ctx.lineWidth = 6;
           ctx.beginPath();
           ctx.arc(reveal.x, reveal.y, 24 + p * 110, 0, Math.PI * 2);
           ctx.stroke();
-          ctx.font = '700 42px Inter, system-ui, sans-serif';
-          ctx.fillStyle = '#2dd4bf';
+          ctx.font = '800 42px Nunito, ui-rounded, system-ui, sans-serif';
+          ctx.fillStyle = '#ffc94d';
           ctx.fillText(String(reveal.value), reveal.x, reveal.y - 62);
           ctx.restore();
         }
@@ -344,6 +361,8 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+    const slop = e.pointerType === 'mouse' ? TAP_SLOP_MOUSE : TAP_SLOP_TOUCH;
+
     if (pointers.current.size === 1) {
       gesture.current = {
         startX: e.clientX,
@@ -351,15 +370,18 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
         moved: 0,
         startView: view,
         pinchDist: 0,
+        slop,
       };
     } else if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
+      pinchUntil.current = Date.now() + 600;
       gesture.current = {
         startX: (a.x + b.x) / 2,
         startY: (a.y + b.y) / 2,
-        moved: TAP_SLOP_PX + 1, // a pinch is never a tap
+        moved: Number.MAX_SAFE_INTEGER, // a pinch is never a tap
         startView: view,
         pinchDist: Math.hypot(a.x - b.x, a.y - b.y),
+        slop,
       };
     }
   }
@@ -383,6 +405,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
       if (g.pinchDist > 0) {
         const factor = dist / g.pinchDist;
         g.pinchDist = dist;
+        pinchUntil.current = Date.now() + 600;
         zoomAt(factor, (a.x + b.x) / 2, (a.y + b.y) / 2);
       }
       return;
@@ -392,7 +415,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
     const dy = e.clientY - g.startY;
     g.moved = Math.max(g.moved, Math.hypot(dx, dy));
     // Only pan once zoomed in; at fit-to-screen there is nowhere to go.
-    if (g.startView.zoom > 1 && g.moved > TAP_SLOP_PX) {
+    if (g.startView.zoom > 1 && g.moved > g.slop) {
       userAdjusted.current = true;
       const { scale } = geometry(g.startView);
       schedulePan(
@@ -411,8 +434,10 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
 
     if (pointers.current.size === 0) {
       gesture.current = null;
-      // A press that didn't travel is a tap: that's a pick or a hunt.
-      if (g && g.moved <= TAP_SLOP_PX && interactive) {
+      // A press that didn't travel is a tap: that's a pick or a hunt. Lifting the last
+      // finger off a pinch must never count, hence the short cooling-off window.
+      const justPinched = Date.now() < pinchUntil.current;
+      if (g && !justPinched && g.moved <= g.slop && interactive) {
         const pt = toBoard(e.clientX, e.clientY);
         if (pt) onPick(pt.x, pt.y);
       }
@@ -431,9 +456,9 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
     <div
       ref={wrapRef}
       className={cn(
-        'relative min-h-0 flex-1 overflow-hidden rounded-xl border transition-colors duration-300',
-        mode === 'pick' ? 'border-primary/60' : 'border-border',
-        locked && 'border-destructive/70',
+        'card-shadow relative min-h-0 flex-1 overflow-hidden rounded-xl border-2 bg-card transition-colors duration-300',
+        mode === 'pick' ? 'border-primary' : 'border-border',
+        locked && 'border-destructive',
       )}
     >
       <canvas
@@ -452,54 +477,63 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
         onWheel={onWheel}
       />
 
-      {/* Zoom controls: essential on a phone, handy on a laptop. */}
-      <div className="absolute top-2 right-2 flex flex-col gap-1">
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          className="border border-border bg-card/90 backdrop-blur"
-          onClick={() => zoomAt(1.4)}
-          aria-label="Zoom in"
-        >
-          <FontAwesomeIcon icon={iconZoomIn} />
-        </Button>
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          className="border border-border bg-card/90 backdrop-blur"
+      {/* Zoom controls. Sized for a thumb, not a cursor — these are the main way a
+          phone player navigates the board. */}
+      <div className="absolute top-2 right-2 flex flex-col gap-1.5">
+        <ZoomButton icon={iconZoomIn} label="Zoom in" onClick={() => zoomAt(1.4)} />
+        <ZoomButton
+          icon={iconZoomOut}
+          label="Zoom out"
           onClick={() => zoomAt(1 / 1.4)}
-          aria-label="Zoom out"
           disabled={!zoomed}
-        >
-          <FontAwesomeIcon icon={iconZoomOut} />
-        </Button>
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          className="border border-border bg-card/90 backdrop-blur"
+        />
+        <ZoomButton
+          icon={iconFit}
+          label="Reset the view"
+          disabled={!zoomed}
           onClick={() => {
             userAdjusted.current = false;
             setView({ ...FIT, zoom: baseZoom(size.w, size.h) });
           }}
-          aria-label="Reset the view"
-          disabled={!zoomed}
-        >
-          <FontAwesomeIcon icon={iconFit} />
-        </Button>
+        />
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-2">
         {mode === 'pick' ? (
-          <span className="animate-rise rounded-full border border-primary/40 bg-card/90 px-3 py-1.5 text-center text-[0.7rem] font-medium tracking-wide text-primary backdrop-blur sm:text-xs">
+          <span className="animate-rise rounded-full bg-primary px-4 py-2 text-center text-sm font-extrabold text-primary-foreground shadow-lg">
             Tap any number to call it
           </span>
         ) : pannable ? (
-          <span className="rounded-full border border-border bg-card/90 px-3 py-1.5 text-[0.7rem] text-muted-foreground backdrop-blur">
+          <span className="rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-bold text-muted-foreground">
             drag to look around · {view.zoom.toFixed(1)}×
           </span>
         ) : null}
       </div>
     </div>
+  );
+}
+
+function ZoomButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: typeof iconZoomIn;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Button
+      variant="secondary"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className="size-11 rounded-full border border-border bg-surface p-0 text-foreground shadow-md hover:bg-surface-2 disabled:opacity-40"
+    >
+      <FontAwesomeIcon icon={icon} className="text-base" />
+    </Button>
   );
 }
 

@@ -66,14 +66,14 @@ export default function HomeScreen() {
 
   return (
     <div className="flex flex-1 items-start justify-center overflow-y-auto p-4 sm:items-center sm:p-5">
-      <Card className="animate-rise my-auto w-full max-w-[26rem] border-border bg-card">
+      <Card className="card-shadow animate-rise my-auto w-full max-w-[26rem] rounded-xl border-border bg-card">
         <CardContent className="space-y-5 pt-1">
           {notice && (
-            <div className="animate-pop flex items-start gap-2.5 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-warning">
+            <div className="animate-pop flex items-start gap-2.5 rounded-lg border border-warning/35 bg-accent-100 px-3.5 py-3 text-sm font-bold text-warning">
               <FontAwesomeIcon icon={iconInfo} className="mt-0.5" />
               <span className="flex-1">{notice}</span>
               <button
-                className="text-warning/70 transition-colors hover:text-warning"
+                className="text-warning/60 transition-colors hover:text-warning"
                 onClick={() => setNotice(null)}
                 aria-label="Dismiss"
               >
@@ -82,10 +82,10 @@ export default function HomeScreen() {
             </div>
           )}
           <div>
-            <h1 className="text-[2.1rem] leading-none font-extrabold tracking-tight">
+            <h1 className="text-4xl leading-none font-extrabold tracking-tight sm:text-[2.6rem]">
               Number<span className="text-primary">Hunt</span>
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-base text-muted-foreground">
               Call a number. Everyone hunts it down. Solve the tile puzzle to score.
             </p>
           </div>
@@ -94,17 +94,19 @@ export default function HomeScreen() {
             <Label htmlFor="name">Your name</Label>
             <Input
               id="name"
+              style={{ fontSize: 16 }}
               value={name}
               maxLength={16}
               placeholder="e.g. Surya"
               autoComplete="off"
+              className="h-12 text-base"
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             />
           </div>
 
           <Button
-            className="h-11 w-full text-base font-semibold"
+            className="h-13 w-full text-lg font-extrabold"
             disabled={!trimmed || busy || !connected}
             onClick={handleCreate}
           >
@@ -125,13 +127,14 @@ export default function HomeScreen() {
               maxLength={4}
               placeholder="CODE"
               autoComplete="off"
-              className="h-11 text-center text-lg font-bold tracking-[0.4em] uppercase"
+              style={{ fontSize: 18 }}
+              className="h-13 text-center text-lg font-extrabold tracking-[0.35em] uppercase"
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
             />
             <Button
               variant="secondary"
-              className="h-11 px-6"
+              className="h-13 px-7 text-base font-extrabold"
               disabled={!trimmed || code.trim().length < 4 || busy || !connected}
               onClick={handleJoin}
             >
@@ -140,7 +143,7 @@ export default function HomeScreen() {
           </div>
 
           {error && (
-            <p className="animate-rise flex items-center gap-2 text-sm text-destructive">
+            <p className="animate-rise flex items-center gap-2 rounded-lg bg-danger-100 px-3 py-2 text-sm font-bold text-destructive">
               <FontAwesomeIcon icon={iconWrong} />
               {error}
             </p>
@@ -152,7 +155,7 @@ export default function HomeScreen() {
           <div>
             <button
               type="button"
-              className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="flex items-center gap-2 text-base font-bold text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => setShowRules((v) => !v)}
             >
               <FontAwesomeIcon
@@ -164,7 +167,7 @@ export default function HomeScreen() {
             {showRules && (
               <ul className="stagger mt-3 space-y-2.5">
                 {RULES.map((r, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-muted-foreground">
+                  <li key={i} className="flex gap-3 text-[0.95rem] text-muted-foreground">
                     <FontAwesomeIcon
                       icon={r.icon}
                       className="mt-0.5 w-4 shrink-0 text-primary"
