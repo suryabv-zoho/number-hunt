@@ -38,4 +38,13 @@ export {
   faCheck as iconAccept,
   faXmark as iconClose,
   faLockOpen as iconRoomOpen,
+  faGraduationCap as iconTeach,
+  faHandPointer as iconHand,
+  faRobot as iconBot,
+  faEye as iconWatch,
+  faUserPlus as iconJoin,
+  faPlus as iconCreate,
+  faArrowLeft as iconBack,
+  faChevronDown as iconCollapse,
+  faPause as iconPaused,
 } from '@fortawesome/free-solid-svg-icons';

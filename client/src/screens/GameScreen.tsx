@@ -6,6 +6,7 @@ import { useStore } from '../store.js';
 import { clickBoard } from '../socket.js';
 import { formatClock, usePassed } from '../hooks.js';
 import HUD from '../components/HUD.js';
+import BotFeed from '../components/BotFeed.js';
 import BoardCanvas, { type BoardMode } from '../components/BoardCanvas.js';
 import PuzzlePanel from '../components/PuzzlePanel.js';
 import StatusStrip from '../components/StatusStrip.js';
@@ -89,7 +90,11 @@ export default function GameScreen() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <HUD />
-      <main className="flex min-h-0 flex-1 flex-col gap-2 p-2 sm:gap-2.5 sm:p-3">{main}</main>
+      <main className="flex min-h-0 flex-1 flex-col gap-2 p-2 sm:gap-2.5 sm:p-3">
+        {main}
+        {/* Practice only: the other side of the turn, which is invisible in a real match. */}
+        {room.practice && <BotFeed />}
+      </main>
     </div>
   );
 }

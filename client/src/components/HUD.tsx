@@ -12,14 +12,18 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from 'cn';
 import {
+  iconBot,
   iconCall,
   iconFound,
   iconLeave,
   iconPuzzle,
   iconSoundOff,
   iconSoundOn,
+  iconTeach,
+  iconPaused,
 } from '@/icons';
 import { useStore } from '../store.js';
+import { useCoach } from '../coach.js';
 import { leaveRoom } from '../socket.js';
 import { formatClock } from '../hooks.js';
 
@@ -30,8 +34,12 @@ export default function HUD() {
   const phaseLeftMs = useStore((s) => s.phaseLeftMs);
   const speak = useStore((s) => s.speak);
   const speechBlocked = useStore((s) => s.speechBlocked);
+  const paused = useStore((s) => s.paused);
   const toggleSpeak = useStore((s) => s.toggleSpeak);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const coachRunning = useCoach((s) => s.running);
+  const coachMinimised = useCoach((s) => s.minimised);
+  const setCoachMinimised = useCoach((s) => s.setMinimised);
 
   const phaseLabel =
     room.phase === 'await_call'
@@ -48,25 +56,67 @@ export default function HUD() {
     .sort((a, b) => b.score - a.score);
 
   return (
-    <header className="brand-bar flex shrink-0 flex-col gap-2.5 px-3 py-2.5 text-white sm:px-5 sm:py-3">
-      <div className="flex items-center gap-3 sm:gap-5">
-        <div className="flex items-baseline gap-2">
-          <span className="text-base font-extrabold tracking-[0.15em] sm:text-lg">
-            {room.code}
-          </span>
+    <header
+      data-tour="hud"
+      className="brand-bar flex shrink-0 flex-col gap-2.5 px-3 py-2.5 text-white sm:px-5 sm:py-3"
+    >
+      <div className="flex items-center gap-2 sm:gap-5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          {/* A practice code is no use to anyone — nobody else can join it. */}
+          {room.practice ? (
+            <span className="flex items-center gap-1.5 text-base font-extrabold tracking-[0.1em] sm:text-lg">
+              <FontAwesomeIcon icon={iconTeach} className="text-sm" />
+              {/* The word is the first thing to go when the row runs out of room. */}
+              <span className="hidden xs:inline">PRACTICE</span>
+            </span>
+          ) : (
+            <span className="truncate text-base font-extrabold tracking-[0.15em] sm:text-lg">
+              {room.code}
+            </span>
+          )}
           <span className="hidden text-sm text-white/70 sm:inline">
             round {room.roundNumber}
           </span>
         </div>
 
-        <div className="flex gap-2">
-          <Clock label="match" value={formatClock(matchLeftMs)} />
+        <div className="flex shrink-0 gap-1.5 sm:gap-2">
+          <Clock label={paused ? 'held' : 'match'} value={formatClock(matchLeftMs)} paused={paused} />
           {phaseLabel && (
-            <Clock label={phaseLabel} value={formatClock(phaseLeftMs)} urgent={urgent} />
+            <Clock
+              label={phaseLabel}
+              value={formatClock(phaseLeftMs)}
+              urgent={urgent && !paused}
+              paused={paused}
+            />
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
+          {/* The tour's home. Floating it over the game meant covering the very thing
+              it describes, so it lives up here where nothing else ever sits. */}
+          {coachRunning && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  onClick={() => setCoachMinimised(!coachMinimised)}
+                  aria-label={
+                    coachMinimised ? 'Show the instructions' : 'Hide the instructions'
+                  }
+                  className="relative size-10 rounded-full p-0 text-white hover:bg-white/15 hover:text-white"
+                >
+                  <FontAwesomeIcon icon={iconTeach} />
+                  {coachMinimised && (
+                    <span className="animate-flash absolute top-1.5 right-1.5 size-2 rounded-full bg-accent-500" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {coachMinimised ? 'Show the instructions' : 'Hide the instructions'}
+              </TooltipContent>
+            </Tooltip>
+          )}
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -92,6 +142,7 @@ export default function HUD() {
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
+                data-tour="leave"
                 onClick={() => setConfirmLeave(true)}
                 aria-label="Leave the match"
                 className="size-10 rounded-full p-0 text-white hover:bg-white/15 hover:text-white"
@@ -124,6 +175,7 @@ export default function HUD() {
                 !p.connected && 'opacity-50',
               )}
             >
+              {p.isBot && <FontAwesomeIcon icon={iconBot} className="text-xs opacity-70" />}
               <span className="max-w-[6rem] truncate sm:max-w-[8rem]">{p.name}</span>
               <span
                 className={cn(
@@ -173,19 +225,24 @@ function Clock({
   label,
   value,
   urgent,
+  paused,
 }: {
   label: string;
   value: string;
   urgent?: boolean;
+  paused?: boolean;
 }) {
   return (
     <div
       className={cn(
-        'flex min-w-[4.2rem] flex-col items-center rounded-lg px-2.5 py-1 transition-colors duration-300 sm:min-w-[5rem]',
+        'flex min-w-[3.6rem] flex-col items-center rounded-lg px-2 py-1 transition-colors duration-300 sm:min-w-[5rem] sm:px-2.5',
         urgent ? 'bg-destructive' : 'bg-white/15',
+        // A clock that has stopped for no visible reason reads as a bug, so it says so.
+        paused && 'bg-white/10 opacity-70',
       )}
     >
-      <span className="text-[0.65rem] font-bold tracking-widest text-white/75 uppercase sm:text-xs">
+      <span className="flex items-center gap-1 text-[0.65rem] font-bold tracking-widest text-white/75 uppercase sm:text-xs">
+        {paused && <FontAwesomeIcon icon={iconPaused} className="text-[0.6rem]" />}
         {label}
       </span>
       <span

@@ -20,10 +20,27 @@ export const WRONG_CLICK_LOCKOUT_MS = 2000;
 /** How long the caller has to pick a number off the board before their turn is burned. */
 export const PICK_MS = 25_000;
 
+/**
+ * The same window in a practice match, for the human only. A first-timer is reading the
+ * coach, finding the board and working out what a "call" even is — putting a 25s clock
+ * on that teaches panic rather than the game. Bots still act in seconds.
+ *
+ * Generous, but still a real clock: it has to stay well inside a practice match, or the
+ * phase counts down from longer than the match it sits in.
+ */
+export const PRACTICE_PICK_MS = 2 * 60_000;
+
 /** The caller pays this for letting their turn expire without calling anything. */
 export const MISSED_CALL_PENALTY = -5;
 /** ...and everyone left waiting gets this for the wasted round. */
 export const MISSED_CALL_CONSOLATION = 2;
+
+/**
+ * How long the coach may hold the clocks before the server gives up and starts them
+ * again. Reading a step takes seconds; anything approaching this means the player walked
+ * away with a card open, and a room frozen for ever is a room that never finishes.
+ */
+export const COACH_MAX_PAUSE_MS = 5 * 60_000;
 
 /** Grace window after the match ends so open puzzles can still be finished. */
 export const WRAPUP_MS = 20_000;

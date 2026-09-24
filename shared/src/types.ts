@@ -27,6 +27,8 @@ export interface Player {
   isHost: boolean;
   /** Walked out on purpose. Their score still counts; they can't come back. */
   left: boolean;
+  /** A practice-match opponent driven by the server, not a person. */
+  isBot: boolean;
 }
 
 export type PuzzleCharset = 'letters' | 'alnum';
@@ -49,6 +51,19 @@ export const DEFAULT_CONFIG: RoomConfig = {
   findSeconds: 60,
   puzzleLength: 6,
   puzzleCharset: 'alnum',
+};
+
+/**
+ * Practice is deliberately gentler than a real match: a thinner board so the number is
+ * findable, short letter-only puzzles so the first solve comes quickly, a long find
+ * window, and a short match so the leaderboard arrives while it still feels relevant.
+ */
+export const PRACTICE_CONFIG: RoomConfig = {
+  numberCount: 35,
+  matchMinutes: 6,
+  findSeconds: 75,
+  puzzleLength: 4,
+  puzzleCharset: 'letters',
 };
 
 export interface Tile {
@@ -88,6 +103,8 @@ export interface RoomState {
   readyForNext: string[];
   /** Where the previous round's number was, revealed after the round resolves. */
   lastReveal: { value: number; x: number; y: number } | null;
+  /** Solo match against two bots, with the coach running. Changes pacing and penalties. */
+  practice: boolean;
 }
 
 export interface TickPayload {
@@ -95,6 +112,8 @@ export interface TickPayload {
   matchLeftMs: number | null;
   /** Ms left in the current phase (call window or find window). */
   phaseLeftMs: number | null;
+  /** Practice only: the clocks are held while a coach instruction is open. */
+  paused?: boolean;
 }
 
 export interface LeaderboardRow {
@@ -175,6 +194,27 @@ export interface BoardWrongPayload {
   playerId: string;
   penalty: number;
   lockedUntilMs: number;
+}
+
+/**
+ * What a bot is doing right now. Practice players can't see over a bot's shoulder, so
+ * the server narrates it instead — that's the whole point of the activity feed.
+ */
+export type BotActivityKind =
+  | 'thinking'
+  | 'called'
+  | 'scanning'
+  | 'found'
+  | 'wrong'
+  | 'solved'
+  | 'gaveup';
+
+export interface BotActivityPayload {
+  botId: string;
+  name: string;
+  kind: BotActivityKind;
+  /** Ready to render — the server already knows the names and the numbers. */
+  text: string;
 }
 
 export interface PuzzleResultPayload {

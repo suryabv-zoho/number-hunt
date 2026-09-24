@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from 'cn';
 import {
   iconAccept,
+  iconBot,
   iconClock,
   iconClose,
   iconHunt,
@@ -22,6 +23,7 @@ import {
   iconPlayers,
   iconPuzzle,
   iconReplay,
+  iconTeach,
   iconTrophy,
   iconWalkedOut,
   iconWrong,
@@ -112,6 +114,15 @@ export default function ResultsScreen() {
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-base font-bold">{r.name}</span>
+                        {room.players.find((p) => p.id === r.playerId)?.isBot && (
+                          <Badge
+                            variant="secondary"
+                            className="gap-1.5 text-[0.65rem] font-normal"
+                          >
+                            <FontAwesomeIcon icon={iconBot} />
+                            computer
+                          </Badge>
+                        )}
                         {r.left && (
                           <Badge
                             variant="secondary"
@@ -151,7 +162,34 @@ export default function ResultsScreen() {
             </Table>
           </div>
 
-          {/* Another match in this same room needs the room's own people to agree. */}
+          {/* A practice room has one human in it, so there is nobody to get consent
+              from and no room to keep open for anyone else. */}
+          {room.practice ? (
+            <div className="space-y-3 rounded-lg bg-surface p-4">
+              <p className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
+                <FontAwesomeIcon icon={iconTeach} />
+                That was a practice match — none of it counted.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  className="h-12 flex-1 text-base font-extrabold"
+                  onClick={playAgain}
+                >
+                  <FontAwesomeIcon icon={iconReplay} />
+                  Practise again
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="h-12 flex-1 text-base font-extrabold"
+                  onClick={leaveRoom}
+                >
+                  <FontAwesomeIcon icon={iconPlayers} />
+                  Play with friends
+                </Button>
+              </div>
+            </div>
+          ) : (
+          /* Another match in this same room needs the room's own people to agree. */
           <div className="space-y-3 rounded-lg bg-surface p-4">
             <div className="flex items-center justify-between gap-2 text-sm">
               <span className="flex items-center gap-2 font-bold text-muted-foreground">
@@ -207,6 +245,7 @@ export default function ResultsScreen() {
               </>
             )}
           </div>
+          )}
         </CardContent>
       </Card>
     </div>

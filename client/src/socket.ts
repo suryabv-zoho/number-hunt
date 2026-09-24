@@ -2,6 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import { C2S, S2C } from '@game/shared';
 import type {
   BoardInitPayload,
+  BotActivityPayload,
   BoardRemovePayload,
   BoardWrongPayload,
   GameOverPayload,
@@ -14,6 +15,7 @@ import type {
   TickPayload,
 } from '@game/shared';
 import { useStore } from './store.js';
+import { useCoach } from './coach.js';
 import { chime, speak, watchSpeechBlocked } from './speech.js';
 
 watchSpeechBlocked((v) => store().setSpeechBlocked(v));
@@ -21,6 +23,11 @@ watchSpeechBlocked((v) => store().setSpeechBlocked(v));
 export const socket: Socket = io({ autoConnect: true });
 
 const store = () => useStore.getState();
+/**
+ * The coach only ever advances on something the server confirmed. Nothing below guesses
+ * at what the player did — it reports what the game said happened.
+ */
+const coach = () => useCoach.getState();
 
 socket.on('connect', () => {
   store().setConnected(true);
@@ -58,6 +65,7 @@ socket.on(S2C.state, (state: RoomState) => {
 socket.on(S2C.turnCalled, (p: { value: number; callerId: string }) => {
   const s = store();
   const caller = s.room?.players.find((pl) => pl.id === p.callerId);
+  coach().signal(p.callerId === s.playerId ? 'i_called' : 'hunt_started');
   if (p.callerId !== s.playerId) {
     s.pushToast(`${caller?.name ?? 'Someone'} called ${p.value}`, 'info');
     if (s.speak) {
@@ -78,13 +86,21 @@ socket.on(S2C.turnMissed, (p: MissedCallPayload) => {
   }
 });
 
-socket.on(S2C.boardInit, (p: BoardInitPayload) => store().setTokens(p.tokens));
+socket.on(S2C.boardInit, (p: BoardInitPayload) => {
+  // A fresh board means a fresh match, so last match's narration goes with it.
+  store().clearBotFeed();
+  store().setTokens(p.tokens);
+});
 socket.on(S2C.boardRemove, (p: BoardRemovePayload) => store().removeToken(p.tokenId));
 
 socket.on(S2C.boardFound, (p: { playerId: string; name: string }) => {
   const s = store();
-  if (p.playerId === s.playerId) s.pushToast('Found it! Solve the puzzle', 'good');
-  else s.pushToast(`${p.name} found it`, 'info');
+  if (p.playerId === s.playerId) {
+    coach().signal('i_found');
+    s.pushToast('Found it! Solve the puzzle', 'good');
+  } else {
+    s.pushToast(`${p.name} found it`, 'info');
+  }
 });
 
 socket.on(S2C.boardWrong, (p: BoardWrongPayload) => {
@@ -110,20 +126,28 @@ socket.on(S2C.puzzleResult, (p: PuzzleResultPayload) => {
   if (p.correct) {
     // The server sends the next puzzle right behind this, so don't clear the panel —
     // that would flash an empty screen between puzzles.
+    coach().signal('i_solved');
     s.bumpStreak();
     s.pushToast(`Solved  +${p.delta}`, 'good');
   }
 });
 
-socket.on(S2C.tick, (p: TickPayload) => store().setTick(p.matchLeftMs, p.phaseLeftMs));
+socket.on(S2C.tick, (p: TickPayload) =>
+  store().setTick(p.matchLeftMs, p.phaseLeftMs, p.paused === true),
+);
+
+socket.on(S2C.botActivity, (p: BotActivityPayload) => store().pushBotActivity(p));
 
 socket.on(S2C.gameOver, (p: GameOverPayload) => {
+  // Whatever the coach was waiting for is not going to happen now.
+  coach().signal('match_over');
   store().setGameOver(p);
   store().setPuzzle(null);
 });
 
 socket.on(S2C.roomClosed, (p: RoomClosedPayload) => {
   const s = store();
+  coach().stop();
   // The room is gone for everyone; drop our seat and say why.
   sessionStorage.removeItem('nh.room');
   sessionStorage.removeItem('nh.playerId');
@@ -152,6 +176,23 @@ export function createRoom(name: string): Promise<JoinAck> {
   );
 }
 
+/**
+ * Solo match against two bots. The server starts it immediately, so there's no lobby in
+ * between — the player lands on the board with the coach already on step one.
+ */
+export function startPractice(name: string): Promise<JoinAck> {
+  store().setHasLeft(false);
+  return new Promise((resolve) =>
+    socket.emit(C2S.createPractice, { name }, (ack: JoinAck) => {
+      if (ack.ok) {
+        store().setHasLeft(false);
+        useCoach.getState().start();
+      }
+      resolve(ack);
+    }),
+  );
+}
+
 export function joinRoom(code: string, name: string, playerId?: string): Promise<JoinAck> {
   store().setHasLeft(false);
   return new Promise((resolve) =>
@@ -161,6 +202,13 @@ export function joinRoom(code: string, name: string, playerId?: string): Promise
     }),
   );
 }
+
+/**
+ * Ask the server to hold the clocks while a coach instruction is on screen. Only a
+ * practice room honours it — the server decides, not us.
+ */
+export const setCoachPaused = (paused: boolean) =>
+  socket.emit(C2S.coachPause, { paused });
 
 export const sendConfig = (config: Partial<RoomState['config']>) =>
   socket.emit(C2S.config, config);
@@ -174,6 +222,7 @@ export const submitPuzzle = (puzzleId: string, order: string[]) =>
   socket.emit(C2S.puzzleSubmit, { puzzleId, order });
 export function leaveRoom() {
   socket.emit(C2S.leave);
+  coach().stop();
   store().setHasLeft(true);
   // Drop the identity too, so the auto-rejoin on the next connect doesn't try to walk
   // back into a match we deliberately walked out of.

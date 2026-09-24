@@ -127,7 +127,10 @@ export default function PuzzlePanel() {
   }
 
   return (
-    <div className="card-shadow flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto rounded-xl border border-border bg-card p-5 text-center sm:gap-6 sm:p-7">
+    <div
+      data-tour="puzzle"
+      className="card-shadow flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto rounded-xl border border-border bg-card p-5 text-center sm:gap-6 sm:p-7"
+    >
       <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
         <FontAwesomeIcon icon={iconPuzzle} className="text-primary" />
         <h2 className="text-lg font-extrabold sm:text-xl">Match the pattern</h2>

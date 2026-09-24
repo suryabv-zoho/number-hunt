@@ -4,17 +4,30 @@ import {
   MISSED_CALL_CONSOLATION,
   MISSED_CALL_PENALTY,
   PICK_MS,
+  COACH_MAX_PAUSE_MS,
+  PRACTICE_CONFIG,
+  PRACTICE_PICK_MS,
   WRAPUP_MS,
   WRONG_CLICK_PENALTY,
 } from '@game/shared';
-import { createRoom, isNameTaken, newPlayer, rooms, type Room } from '../state.js';
+import {
+  connectedHumans,
+  createRoom,
+  isNameTaken,
+  newPlayer,
+  rooms,
+  type Room,
+} from '../state.js';
+import { addBots, attachBotActions, forgetBots } from '../bots.js';
 import {
   boardClick,
+  callNumber,
   currentTargetToken,
   handleDisconnect,
   leaderboard,
   leaveMatch,
   resendPrivate,
+  setPaused,
   startMatch,
   stopTimers,
   submitPuzzle,
@@ -495,5 +508,181 @@ describe('ending', () => {
     const rows = leaderboard(room);
     expect(rows[0].playerId).toBe('p1');
     expect(rows[1].playerId).toBe('p2');
+  });
+});
+
+describe('pausing', () => {
+  it('refuses to hold the clocks in a real match', () => {
+    startMatch(room);
+    const matchEnd = room.matchEndsAt!;
+    // One player must never be able to freeze everybody else's game.
+    setPaused(room, true);
+    expect(room.pausedAt).toBeNull();
+    vi.advanceTimersByTime(10_000);
+    expect(room.matchEndsAt!).toBe(matchEnd);
+  });
+});
+
+describe('practice matches', () => {
+  /** A practice room as `room:practice` builds one: one human, then two bots. */
+  function makePractice(): Room {
+    const r = createRoom('', true);
+    const human = newPlayer('h0', 'Human', 's0');
+    r.players.set(human.id, human);
+    r.order.push(human.id);
+    r.hostId = human.id;
+    r.config = { ...PRACTICE_CONFIG, numberCount: 25 };
+    addBots(r, 2);
+    return r;
+  }
+
+  let practice: Room;
+
+  beforeEach(() => {
+    // Production wires this up in index.ts. Bots reach the game through the same entry
+    // points a socket does, so the tests drive the real ones rather than stubs.
+    attachBotActions({
+      callNumber,
+      boardClick,
+      submitPuzzle,
+      narrate: () => {},
+    });
+    practice = makePractice();
+  });
+
+  afterEach(() => {
+    stopTimers(practice);
+    forgetBots(practice);
+    rooms.delete(practice.code);
+  });
+
+  it('seats two bots and avoids reusing the human\'s name', () => {
+    const bots = [...practice.players.values()].filter((p) => p.isBot);
+    expect(bots).toHaveLength(2);
+    expect(bots.map((b) => b.name)).not.toContain('Human');
+    expect(new Set(bots.map((b) => b.name)).size).toBe(2);
+  });
+
+  it('gives the human the first turn, so the tutorial opens on a call', () => {
+    expect(startMatch(practice)).toBeNull();
+    expect(practice.currentCallerId).toBe('h0');
+    expect(practice.phase).toBe('await_call');
+  });
+
+  it('gives the human a long pick window, but keeps bots on the normal clock', () => {
+    startMatch(practice);
+    // The human is calling: they get the reading-time window, not the 25s one.
+    expect(practice.phaseEndsAt! - Date.now()).toBeGreaterThan(PICK_MS * 2);
+
+    // Their turn over, the next caller is a bot and the clock goes back to normal.
+    call(practice, 'h0');
+    vi.advanceTimersByTime(practice.config.findSeconds * 1000);
+    expect(practice.players.get(practice.currentCallerId!)!.isBot).toBe(true);
+    expect(practice.phaseEndsAt! - Date.now()).toBeLessThanOrEqual(PICK_MS);
+  });
+
+  it('keeps the practice call window inside the practice match', () => {
+    startMatch(practice);
+    // The bug this guards: a pick window longer than the match it sits in, which showed
+    // the player "MATCH 5:20 / CALLING 9:20".
+    expect(PRACTICE_PICK_MS).toBeLessThan(PRACTICE_CONFIG.matchMinutes * 60_000);
+    expect(practice.phaseEndsAt!).toBeLessThanOrEqual(practice.matchEndsAt!);
+  });
+
+  it('never lets a phase clock outlast the match clock', () => {
+    startMatch(practice);
+    // Squeeze the match down to less than one find window.
+    practice.matchEndsAt = Date.now() + 20_000;
+
+    call(practice, 'h0');
+    expect(practice.phase).toBe('hunting');
+    expect(practice.phaseEndsAt!).toBe(practice.matchEndsAt!);
+
+    // ...and the same for a call window opened near the end.
+    handleDisconnect(practice, player(practice, 'h0'));
+    expect(practice.phaseEndsAt!).toBeLessThanOrEqual(practice.matchEndsAt!);
+  });
+
+  it('holds the clocks while a coach instruction is open, then puts them back', () => {
+    startMatch(practice);
+    const matchEnd = practice.matchEndsAt!;
+    const phaseEnd = practice.phaseEndsAt!;
+
+    setPaused(practice, true);
+    vi.advanceTimersByTime(30_000);
+    // Nothing expired behind the card: both deadlines moved with the pause.
+    expect(practice.phase).toBe('await_call');
+
+    setPaused(practice, false);
+    expect(practice.matchEndsAt!).toBe(matchEnd + 30_000);
+    expect(practice.phaseEndsAt!).toBe(phaseEnd + 30_000);
+  });
+
+  it('does not let reading time eat the puzzle speed bonus', () => {
+    startMatch(practice);
+    call(practice, 'h0');
+    const startedAt = practice.puzzles.get('h0')!.startedAt;
+
+    setPaused(practice, true);
+    vi.advanceTimersByTime(20_000);
+    setPaused(practice, false);
+
+    expect(practice.puzzles.get('h0')!.startedAt).toBe(startedAt + 20_000);
+  });
+
+  it('gives a full find window to a number called from behind an open card', () => {
+    startMatch(practice);
+    setPaused(practice, true);
+    vi.advanceTimersByTime(40_000); // reading, at length
+
+    call(practice, 'h0'); // acted on while the clocks were still held
+    setPaused(practice, false);
+
+    // Not 75s + the 40s spent reading.
+    const left = practice.phaseEndsAt! - Date.now();
+    expect(left).toBeGreaterThan(74_000);
+    expect(left).toBeLessThanOrEqual(75_000);
+  });
+
+  it('starts the clocks again if a card is left open for too long', () => {
+    startMatch(practice);
+    setPaused(practice, true);
+    vi.advanceTimersByTime(COACH_MAX_PAUSE_MS + 2000);
+    // The tick gives up on a room nobody is reading and lets it run again.
+    expect(practice.pausedAt).toBeNull();
+  });
+
+  it('never penalises a missed call', () => {
+    startMatch(practice);
+    // Sit on the turn until it expires.
+    vi.advanceTimersByTime(PRACTICE_PICK_MS + 10);
+    for (const p of practice.players.values()) expect(p.score).toBe(0);
+  });
+
+  it('bots take their turn and hunt without a socket', () => {
+    startMatch(practice);
+    call(practice, 'h0');
+    vi.advanceTimersByTime(practice.config.findSeconds * 1000);
+
+    // A bot is now calling; let its thinking time elapse.
+    expect(practice.phase).toBe('await_call');
+    vi.advanceTimersByTime(6000);
+    expect(practice.phase).toBe('hunting');
+    expect(practice.calledValue).not.toBeNull();
+  });
+
+  it('ends the moment its one human walks out, rather than playing on with bots', () => {
+    startMatch(practice);
+    expect(practice.phase).toBe('await_call');
+    leaveMatch(practice, player(practice, 'h0'));
+    // Two bots are still "connected", so only a human-aware check ends this.
+    expect(practice.phase).toBe('ended');
+  });
+
+  it('keeps bots out of the leaderboard\'s host and name checks', () => {
+    // A bot name must still block a human from taking it, so the board stays readable.
+    const bot = [...practice.players.values()].find((p) => p.isBot)!;
+    expect(isNameTaken(practice, bot.name)).toBe(true);
+    expect(connectedHumans(practice)).toHaveLength(1);
   });
 });

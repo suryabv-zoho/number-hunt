@@ -1,5 +1,5 @@
 import type { Server, Socket } from 'socket.io';
-import { C2S, S2C, DEFAULT_CONFIG } from '@game/shared';
+import { C2S, S2C, DEFAULT_CONFIG, PRACTICE_CONFIG } from '@game/shared';
 import type {
   BoardClickReq,
   CreateRoomReq,
@@ -8,8 +8,10 @@ import type {
   PuzzleSubmitReq,
   RoomConfig,
 } from '@game/shared';
+import { addBots, forgetBots } from './bots.js';
 import {
   createRoom,
+  humanPlayers,
   isNameTaken,
   makeId,
   newPlayer,
@@ -24,6 +26,7 @@ import {
   handleDisconnect,
   leaveMatch,
   resendPrivate,
+  setPaused,
   startMatch,
   stopTimers,
   submitPuzzle,
@@ -77,6 +80,13 @@ function enter(socket: Socket, room: Room, name: string, wantedId?: string): Joi
   // Walking out is final. Losing your wifi is not.
   if (existing?.left || (wantedId && room.banned.has(wantedId))) {
     return { ok: false, error: 'You left this room — you can\'t rejoin it' };
+  }
+  // Practice is one person against the computer. The seat holder can still reconnect
+  // after a refresh — `existing` covers that — but nobody new sits down. The human
+  // count is what makes this safe to apply here: at creation the room has no people in
+  // it yet, so the player it was made for isn't turned away from their own room.
+  if (room.practice && !existing && humanPlayers(room).length > 0) {
+    return { ok: false, error: 'That code belongs to a practice match' };
   }
   // A match is a closed table: reconnects only, no fresh faces mid-game.
   if (inProgress && !existing) {
@@ -141,6 +151,39 @@ export function registerHandlers(server: Server) {
       ack?.(enter(socket, room, name, undefined));
     });
 
+    /**
+     * Practice: a private room with two bots, started immediately. There is no lobby to
+     * wait in and no code to share, so the player lands straight on the board with the
+     * coach running.
+     */
+    socket.on(C2S.createPractice, (req: CreateRoomReq, ack?: (r: JoinAck) => void) => {
+      if (ctx(socket)) {
+        ack?.({ ok: false, error: "You're already in a room. Leave it first." });
+        return;
+      }
+      const room = createRoom('', true);
+      room.config = { ...PRACTICE_CONFIG };
+      const joined = enter(socket, room, cleanName(req?.name), undefined);
+      if (!joined.ok) {
+        rooms.delete(room.code);
+        ack?.(joined);
+        return;
+      }
+
+      // Seated after the human, so the round-robin reaches the player first — their
+      // opening turn is a call, which is the clearest thing to teach first.
+      addBots(room, 2);
+      const err = startMatch(room);
+      if (err) {
+        // Nothing has been broadcast yet beyond the lobby state, so just report it.
+        forgetBots(room);
+        rooms.delete(room.code);
+        ack?.({ ok: false, error: err });
+        return;
+      }
+      ack?.(joined);
+    });
+
     socket.on(C2S.joinRoom, (req: JoinRoomReq, ack?: (r: JoinAck) => void) => {
       const code = String(req?.code ?? '').trim().toUpperCase();
       const room = rooms.get(code);
@@ -154,6 +197,7 @@ export function registerHandlers(server: Server) {
     socket.on(C2S.config, (raw: Partial<RoomConfig>) => {
       const c = ctx(socket);
       if (!c) return;
+      if (c.room.practice) return fail(socket, 'Practice settings are fixed');
       if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can change settings');
       if (c.room.phase !== 'lobby' && c.room.phase !== 'ended') {
         return fail(socket, 'Settings are locked while a match is running');
@@ -165,6 +209,7 @@ export function registerHandlers(server: Server) {
     socket.on(C2S.start, () => {
       const c = ctx(socket);
       if (!c) return;
+      if (c.room.practice) return; // started on creation, and there is no lobby
       if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can start');
       const err = startMatch(c.room);
       if (err) fail(socket, err);
@@ -183,6 +228,13 @@ export function registerHandlers(server: Server) {
       if (!c) return;
       if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can restart');
       if (c.room.phase !== 'ended') return;
+
+      if (c.room.practice) {
+        // Only one human in the room, so there is nobody to get consent from.
+        const err = startMatch(c.room);
+        if (err) fail(socket, err);
+        return;
+      }
 
       // The host doesn't get to drag people into another match on their own.
       const others = [...c.room.readyForNext].filter((id) => id !== c.player.id);
@@ -212,6 +264,7 @@ export function registerHandlers(server: Server) {
       if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can close the room');
       const { room } = c;
       stopTimers(room);
+      forgetBots(room);
       io?.to(room.code).emit(S2C.roomClosed, { by: c.player.name });
       for (const sid of [...room.players.values()].map((p) => p.socketId)) {
         if (!sid) continue;
@@ -223,6 +276,14 @@ export function registerHandlers(server: Server) {
         }
       }
       rooms.delete(room.code);
+    });
+
+    socket.on(C2S.coachPause, (req: { paused?: boolean }) => {
+      const c = ctx(socket);
+      if (!c) return;
+      // `setPaused` ignores anything that isn't a practice room, so a client asking to
+      // stop the clock in a real match gets nothing.
+      setPaused(c.room, req?.paused === true);
     });
 
     socket.on(C2S.boardClick, (req: BoardClickReq) => {
@@ -283,6 +344,16 @@ function leaveRoom(room: Room, player: PlayerInternal) {
   room.players.delete(player.id);
   room.order = room.order.filter((id) => id !== player.id);
   room.puzzles.delete(player.id);
+
+  // A practice room is that one person's room. Once they're gone it is just two bots
+  // playing to an empty chair, so it goes now rather than waiting on the janitor.
+  if (room.practice) {
+    stopTimers(room);
+    forgetBots(room);
+    rooms.delete(room.code);
+    return;
+  }
+
   passHostIfNeeded(room);
   broadcastState(room);
 }
@@ -292,7 +363,7 @@ function passHostIfNeeded(room: Room) {
   if (host?.connected && !host.left) return;
   const next = room.order
     .map((id) => room.players.get(id))
-    .find((p) => p?.connected && !p.left);
+    .find((p) => p?.connected && !p.left && !p.isBot);
   if (next) room.hostId = next.id;
 }
 
@@ -301,12 +372,17 @@ export function startJanitor() {
   setInterval(() => {
     const now = Date.now();
     for (const [code, room] of rooms) {
+      // Bots are connected for as long as they exist, so asking them whether anyone is
+      // still here would keep every abandoned practice room alive forever.
       const anyone = [...room.players.values()].some(
-        (p) => p.connected || (p.disconnectedAt && now - p.disconnectedAt < 15 * 60_000),
+        (p) =>
+          !p.isBot &&
+          (p.connected || (p.disconnectedAt && now - p.disconnectedAt < 15 * 60_000)),
       );
       if (!anyone || room.players.size === 0) {
         if (now - room.createdAt > 60_000) {
           stopTimers(room);
+          forgetBots(room);
           rooms.delete(code);
           console.log(`[room ${code}] reclaimed`);
         }

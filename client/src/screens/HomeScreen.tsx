@@ -1,22 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import {
+  iconBack,
   iconBlocked,
   iconCall,
+  iconCreate,
   iconFound,
   iconHunt,
   iconInfo,
+  iconJoin,
   iconNext,
   iconPuzzle,
+  iconTeach,
   iconWrong,
 } from '@/icons';
 import { useStore } from '../store.js';
-import { createRoom, joinRoom } from '../socket.js';
+import { createRoom, joinRoom, startPractice } from '../socket.js';
 
 const RULES = [
   { icon: iconCall, text: 'On your turn, pick any number on the board and call it out loud.' },
@@ -27,42 +30,64 @@ const RULES = [
   { icon: iconBlocked, text: 'Sit on your turn without calling and you lose 5; everyone else gains 2.' },
 ];
 
+/**
+ * One decision per screen.
+ *
+ * Create and Join used to sit on the same card, and people read the code box as
+ * something they had to fill in before they could do anything at all. Now the name is
+ * asked once, then the three ways in are three separate choices, and the code box only
+ * exists once you've said you have a code.
+ */
+type Step = 'name' | 'mode' | 'code';
+
 export default function HomeScreen() {
   const storedName = useStore((s) => s.name);
   const setIdentity = useStore((s) => s.setIdentity);
   const connected = useStore((s) => s.connected);
   const notice = useStore((s) => s.notice);
   const setNotice = useStore((s) => s.setNotice);
+
+  const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState(storedName);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRules, setShowRules] = useState(false);
 
+  const nameRef = useRef<HTMLInputElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
   const trimmed = name.trim();
 
-  async function handleCreate() {
-    if (!trimmed || busy) return;
-    setBusy(true);
+  // Put the cursor where the player has to type next, so each step is one tap.
+  useEffect(() => {
+    if (step === 'name') nameRef.current?.focus();
+    if (step === 'code') codeRef.current?.focus();
+  }, [step]);
+
+  function go(next: Step) {
     setError(null);
-    setNotice(null);
-    const ack = await createRoom(trimmed);
-    setBusy(false);
-    if (ack.ok && ack.playerId) setIdentity(ack.playerId, trimmed);
-    else setError(ack.error ?? 'Could not create a room');
+    setStep(next);
   }
 
-  async function handleJoin() {
-    const c = code.trim().toUpperCase();
-    if (!trimmed || c.length < 4 || busy) return;
+  /** Every way in lands here: same busy handling, same error handling. */
+  async function attempt(run: () => Promise<{ ok: boolean; error?: string; playerId?: string }>) {
+    if (!trimmed || busy || !connected) return;
     setBusy(true);
     setError(null);
     setNotice(null);
-    const ack = await joinRoom(c, trimmed);
+    const ack = await run();
     setBusy(false);
     if (ack.ok && ack.playerId) setIdentity(ack.playerId, trimmed);
-    else setError(ack.error ?? 'Could not join');
+    else setError(ack.error ?? 'Something went wrong');
   }
+
+  const handleCreate = () => attempt(() => createRoom(trimmed));
+  const handlePractice = () => attempt(() => startPractice(trimmed));
+  const handleJoin = () => {
+    const c = code.trim().toUpperCase();
+    if (c.length < 4) return;
+    return attempt(() => joinRoom(c, trimmed));
+  };
 
   return (
     <div className="flex flex-1 items-start justify-center overflow-y-auto p-4 sm:items-center sm:p-5">
@@ -81,6 +106,7 @@ export default function HomeScreen() {
               </button>
             </div>
           )}
+
           <div>
             <h1 className="text-4xl leading-none font-extrabold tracking-tight sm:text-[2.6rem]">
               Number<span className="text-primary">Hunt</span>
@@ -90,56 +116,124 @@ export default function HomeScreen() {
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="name">Your name</Label>
-            <Input
-              id="name"
-              style={{ fontSize: 16 }}
-              value={name}
-              maxLength={16}
-              placeholder="e.g. Surya"
-              autoComplete="off"
-              className="h-12 text-base"
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            />
-          </div>
+          {/* Keyed so each step plays its own entrance rather than swapping in place. */}
+          <div key={step} className="animate-rise space-y-5">
+            {step === 'name' && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="name">What should we call you?</Label>
+                  <Input
+                    id="name"
+                    ref={nameRef}
+                    style={{ fontSize: 16 }}
+                    value={name}
+                    maxLength={16}
+                    placeholder="e.g. Surya"
+                    autoComplete="off"
+                    className="h-12 text-base"
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && trimmed && go('mode')}
+                  />
+                </div>
+                <Button
+                  className="h-13 w-full text-lg font-extrabold"
+                  disabled={!trimmed || !connected}
+                  onClick={() => go('mode')}
+                >
+                  Continue
+                  <FontAwesomeIcon icon={iconNext} />
+                </Button>
+              </>
+            )}
 
-          <Button
-            className="h-13 w-full text-lg font-extrabold"
-            disabled={!trimmed || busy || !connected}
-            onClick={handleCreate}
-          >
-            Create a room
-          </Button>
+            {step === 'mode' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <BackButton onClick={() => go('name')} />
+                  <p className="text-base font-bold">
+                    Hi, <span className="text-primary">{trimmed}</span>
+                  </p>
+                </div>
 
-          <div className="flex items-center gap-3">
-            <Separator className="flex-1" />
-            <span className="text-xs tracking-wide text-muted-foreground uppercase">
-              or join one
-            </span>
-            <Separator className="flex-1" />
-          </div>
+                {/* First and loudest: most people arriving here have never played. */}
+                <button
+                  type="button"
+                  onClick={handlePractice}
+                  disabled={busy || !connected}
+                  className="group w-full rounded-xl border-2 border-primary bg-surface p-4 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
+                >
+                  <span className="flex items-center gap-2.5 text-base font-extrabold text-primary">
+                    <FontAwesomeIcon icon={iconTeach} />
+                    Practice match
+                    <FontAwesomeIcon
+                      icon={iconNext}
+                      className="ml-auto transition-transform duration-200 group-hover:translate-x-1"
+                    />
+                  </span>
+                  <span className="mt-1.5 block text-sm text-muted-foreground">
+                    New here? Play on your own against two computer players. I'll explain
+                    every part of the screen and tell you what to do, step by step.
+                  </span>
+                </button>
 
-          <div className="flex gap-2">
-            <Input
-              value={code}
-              maxLength={4}
-              placeholder="CODE"
-              autoComplete="off"
-              style={{ fontSize: 18 }}
-              className="h-13 text-center text-lg font-extrabold tracking-[0.35em] uppercase"
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-            />
-            <Button
-              variant="secondary"
-              className="h-13 px-7 text-base font-extrabold"
-              disabled={!trimmed || code.trim().length < 4 || busy || !connected}
-              onClick={handleJoin}
-            >
-              Join
-            </Button>
+                <div className="space-y-2.5">
+                  <Button
+                    className="h-13 w-full text-lg font-extrabold"
+                    disabled={busy || !connected}
+                    onClick={handleCreate}
+                  >
+                    <FontAwesomeIcon icon={iconCreate} />
+                    Create a room
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="h-13 w-full text-lg font-extrabold"
+                    disabled={busy || !connected}
+                    onClick={() => go('code')}
+                  >
+                    <FontAwesomeIcon icon={iconJoin} />
+                    Join with a code
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {step === 'code' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <BackButton onClick={() => go('mode')} />
+                  <p className="text-base font-bold">Join a room</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="code">Room code</Label>
+                  <Input
+                    id="code"
+                    ref={codeRef}
+                    value={code}
+                    maxLength={4}
+                    placeholder="CODE"
+                    autoComplete="off"
+                    style={{ fontSize: 18 }}
+                    className="h-14 text-center text-2xl font-extrabold tracking-[0.35em] uppercase"
+                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Four characters, from whoever created the room.
+                  </p>
+                </div>
+
+                <Button
+                  className="h-13 w-full text-lg font-extrabold"
+                  disabled={code.trim().length < 4 || busy || !connected}
+                  onClick={handleJoin}
+                >
+                  Join room
+                  <FontAwesomeIcon icon={iconNext} />
+                </Button>
+              </>
+            )}
           </div>
 
           {error && (
@@ -181,5 +275,18 @@ export default function HomeScreen() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      onClick={onClick}
+      aria-label="Back"
+      className="size-10 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground"
+    >
+      <FontAwesomeIcon icon={iconBack} />
+    </Button>
   );
 }

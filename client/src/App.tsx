@@ -10,6 +10,7 @@ import LobbyScreen from './screens/LobbyScreen.js';
 import GameScreen from './screens/GameScreen.js';
 import ResultsScreen from './screens/ResultsScreen.js';
 import Toasts from './components/Toasts.js';
+import CoachOverlay from './components/CoachOverlay.js';
 
 export default function App() {
   const room = useStore((s) => s.room);
@@ -58,6 +59,7 @@ export default function App() {
           {screen}
         </div>
         <Toasts />
+        <CoachOverlay />
       </div>
     </TooltipProvider>
   );

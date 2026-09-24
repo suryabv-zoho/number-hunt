@@ -490,6 +490,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   return (
     <div
       ref={wrapRef}
+      data-tour="board"
       className={cn(
         'card-shadow relative min-h-0 flex-1 overflow-hidden rounded-xl border-2 bg-card transition-colors duration-300',
         mode === 'pick' ? 'border-primary' : 'border-border',

@@ -1,9 +1,11 @@
 import type { Server } from 'socket.io';
 import {
+  COACH_MAX_PAUSE_MS,
   LONELY_GRACE_MS,
   MISSED_CALL_CONSOLATION,
   MISSED_CALL_PENALTY,
   PICK_MS,
+  PRACTICE_PICK_MS,
   S2C,
   WRAPUP_MS,
   WRONG_CLICK_LOCKOUT_MS,
@@ -16,6 +18,7 @@ import {
   scorePuzzle,
 } from '@game/shared';
 import type {
+  BotActivityPayload,
   EndReason,
   GameOverPayload,
   LeaderboardRow,
@@ -24,6 +27,7 @@ import type {
 } from '@game/shared';
 import {
   activePlayers,
+  connectedHumans,
   connectedPlayers,
   makeId,
   publicState,
@@ -31,6 +35,15 @@ import {
   type PuzzleInternal,
   type Room,
 } from './state.js';
+import {
+  clearBotTimers,
+  onAwaitCall,
+  onBotSolved,
+  onCalled,
+  onPuzzleOpened,
+  pauseBotTimers,
+  resumeBotTimers,
+} from './bots.js';
 
 let io: Server | null = null;
 export function attachIo(server: Server) {
@@ -49,6 +62,21 @@ function toPlayer(player: PlayerInternal, event: string, payload?: unknown) {
 
 export function broadcastState(room: Room) {
   toRoom(room, S2C.state, publicState(room));
+}
+
+/** Practice narration. Nobody else is in the room, so a plain broadcast is fine. */
+export function narrateBot(room: Room, payload: BotActivityPayload) {
+  toRoom(room, S2C.botActivity, payload);
+}
+
+/**
+ * A practice room lives and dies with its one human — bots report as connected forever,
+ * so every liveness question has to be asked about the people instead.
+ */
+function enoughToPlay(room: Room): boolean {
+  return room.practice
+    ? connectedHumans(room).length >= 1
+    : connectedPlayers(room).length >= 2;
 }
 
 function puzzleView(p: PuzzleInternal): PuzzleView {
@@ -70,8 +98,39 @@ function clearPhaseTimer(room: Room) {
   }
 }
 
+/**
+ * The clock everything with a deadline is measured against.
+ *
+ * While the coach is holding the clocks this is the moment they stopped, not the real
+ * time — the player can still act behind an open card, and a phase started then has to
+ * begin where the clocks are, or resuming would shift it by the whole pause on top of
+ * the time it had already been given.
+ */
+function nowIn(room: Room): number {
+  return room.pausedAt ?? Date.now();
+}
+
+/**
+ * Start a phase, never promising more time than the match itself has left.
+ *
+ * Without this the phase clock can count down from longer than the match clock — a
+ * 2 minute call window with 90s left on the match reads as "MATCH 1:30 / CALLING 2:00",
+ * which is nonsense, and the phase clock is the one players actually act on.
+ */
+function beginPhase(room: Room, ms: number, fn: () => void) {
+  const endsAt = Math.min(
+    nowIn(room) + Math.max(0, ms),
+    room.matchEndsAt ?? Number.MAX_SAFE_INTEGER,
+  );
+  room.phaseEndsAt = endsAt;
+  return () => setPhaseTimer(room, endsAt - nowIn(room), fn);
+}
+
 function setPhaseTimer(room: Room, ms: number, fn: () => void) {
   clearPhaseTimer(room);
+  // Remembered so a pause can cancel this timer and re-arm the same outcome later.
+  room.phaseFn = fn;
+  if (room.pausedAt !== null) return;
   room.timers.phase = setTimeout(() => {
     room.timers.phase = null;
     try {
@@ -86,10 +145,22 @@ function startTicking(room: Room) {
   if (room.timers.tick) clearInterval(room.timers.tick);
   room.timers.tick = setInterval(() => {
     const now = Date.now();
+    // While the clocks are held, every deadline is read against the moment they stopped,
+    // so both counters sit still instead of draining behind a coach card.
+    const shown = room.pausedAt ?? now;
+
     toRoom(room, S2C.tick, {
-      matchLeftMs: room.matchEndsAt ? Math.max(0, room.matchEndsAt - now) : null,
-      phaseLeftMs: room.phaseEndsAt ? Math.max(0, room.phaseEndsAt - now) : null,
+      matchLeftMs: room.matchEndsAt ? Math.max(0, room.matchEndsAt - shown) : null,
+      phaseLeftMs: room.phaseEndsAt ? Math.max(0, room.phaseEndsAt - shown) : null,
+      paused: room.pausedAt !== null,
     });
+
+    if (room.pausedAt !== null) {
+      // Somebody walked away with a card open. Don't leave the room frozen for ever.
+      if (now - room.pausedAt > COACH_MAX_PAUSE_MS) setPaused(room, false);
+      return;
+    }
+
     if (
       room.matchEndsAt &&
       now >= room.matchEndsAt &&
@@ -100,8 +171,48 @@ function startTicking(room: Room) {
   }, 1000);
 }
 
+/**
+ * Hold (or release) the clocks while the player reads a coach instruction.
+ *
+ * Practice only, and deliberately so: letting one player stop the clock would be a way
+ * to freeze everybody else's match. Nothing is cancelled — every deadline, and every
+ * bot action, is shifted forward by exactly how long the pause lasted, so the match
+ * resumes in the state it was left in rather than lurching.
+ */
+export function setPaused(room: Room, paused: boolean) {
+  if (!room.practice) return;
+  const running =
+    room.phase === 'await_call' || room.phase === 'hunting' || room.phase === 'wrapup';
+  if (!running) return;
+
+  if (paused) {
+    if (room.pausedAt !== null) return;
+    room.pausedAt = Date.now();
+    clearPhaseTimer(room);
+    pauseBotTimers(room);
+    return;
+  }
+
+  if (room.pausedAt === null) return;
+  const held = Date.now() - room.pausedAt;
+  room.pausedAt = null;
+
+  if (room.matchEndsAt) room.matchEndsAt += held;
+  if (room.phaseEndsAt) room.phaseEndsAt += held;
+  // Open puzzles too, or reading a step would quietly eat the player's speed bonus.
+  for (const pz of room.puzzles.values()) pz.startedAt += held;
+  resumeBotTimers(room, held);
+
+  if (room.phaseFn && room.phaseEndsAt) {
+    setPhaseTimer(room, room.phaseEndsAt - Date.now(), room.phaseFn);
+  }
+}
+
 export function stopTimers(room: Room) {
   clearPhaseTimer(room);
+  clearBotTimers(room);
+  room.phaseFn = null;
+  room.pausedAt = null;
   if (room.timers.tick) {
     clearInterval(room.timers.tick);
     room.timers.tick = null;
@@ -117,6 +228,10 @@ export function stopTimers(room: Room) {
 export function startMatch(room: Room): string | null {
   if (room.phase !== 'lobby' && room.phase !== 'ended') return 'Match already running';
   if (connectedPlayers(room).length < 2) return 'Need at least 2 players to start';
+
+  // A rematch reuses the room, so anything a bot still had planned for the last match
+  // must not fire into this one.
+  clearBotTimers(room);
 
   room.seed = Math.floor(Math.random() * 2 ** 31);
   room.tokens = generateBoard(room.config.numberCount, room.seed);
@@ -179,10 +294,15 @@ export function beginAwaitCall(room: Room) {
   room.target = null;
   room.calledValue = null;
   room.foundBy.clear();
-  room.phaseEndsAt = Date.now() + PICK_MS;
+
+  // A practice human gets a long window to read the coach and work out what "call a
+  // number" even means. Bots are on the normal clock; they act within a few seconds.
+  const pickMs = room.practice && !caller.isBot ? PRACTICE_PICK_MS : PICK_MS;
+  const armPick = beginPhase(room, pickMs, () => missCall(room));
 
   broadcastState(room);
-  setPhaseTimer(room, PICK_MS, () => missCall(room));
+  armPick();
+  onAwaitCall(room);
 }
 
 /**
@@ -194,8 +314,9 @@ function missCall(room: Room) {
 
   const caller = room.players.get(room.currentCallerId);
   // With nobody else connected there is no turn to waste and nobody kept waiting, so
-  // the last player standing isn't fined while the room winds down.
-  const scoring = connectedPlayers(room).length >= 2;
+  // the last player standing isn't fined while the room winds down. Practice never
+  // fines anybody — it exists to be got wrong.
+  const scoring = connectedPlayers(room).length >= 2 && !room.practice;
 
   if (scoring) {
     if (caller) caller.score = applyDelta(caller.score, MISSED_CALL_PENALTY);
@@ -247,7 +368,9 @@ export function callNumber(room: Room, token: NumberToken) {
   room.calledValue = room.target.value;
   room.foundBy.clear();
   room.lastReveal = null;
-  room.phaseEndsAt = Date.now() + room.config.findSeconds * 1000;
+  const armFind = beginPhase(room, room.config.findSeconds * 1000, () =>
+    resolveRound(room),
+  );
 
   // The caller is busy with their own puzzle so they can't help (or gloat).
   const caller = room.players.get(room.currentCallerId!);
@@ -259,7 +382,8 @@ export function callNumber(room: Room, token: NumberToken) {
   });
   broadcastState(room);
 
-  setPhaseTimer(room, room.config.findSeconds * 1000, () => resolveRound(room));
+  armFind();
+  onCalled(room);
 }
 
 /**
@@ -338,11 +462,14 @@ function openPuzzle(room: Room, player: PlayerInternal) {
     playerId: player.id,
     target,
     tiles,
-    startedAt: Date.now(),
+    // Frozen clock, for the same reason as a phase: a puzzle opened behind a coach card
+    // must not be shifted forward by a pause it was never part of.
+    startedAt: nowIn(room),
     roundNumber: room.roundNumber,
   };
   room.puzzles.set(player.id, puzzle);
   toPlayer(player, S2C.puzzleStart, puzzleView(puzzle));
+  onPuzzleOpened(room, player, puzzle);
 }
 
 function closePuzzle(room: Room, playerId: string, reason: string) {
@@ -394,6 +521,7 @@ export function submitPuzzle(
   player.score = applyDelta(player.score, delta);
   player.stats.puzzlesSolved += 1;
   room.puzzles.delete(player.id);
+  if (player.isBot) onBotSolved(room, player, delta);
 
   toPlayer(player, S2C.puzzleResult, {
     puzzleId,
@@ -494,7 +622,12 @@ export function leaderboard(room: Room): LeaderboardRow[] {
  */
 function endIfTooFewPlayers(room: Room): boolean {
   if (room.phase === 'lobby' || room.phase === 'ended') return false;
-  if (activePlayers(room).length >= 2) return false;
+  if (room.practice) {
+    // Bots would happily play on by themselves. Without the human there is no match.
+    if (connectedHumans(room).some((p) => !p.left)) return false;
+  } else if (activePlayers(room).length >= 2) {
+    return false;
+  }
   endMatch(room, 'not_enough_players');
   return true;
 }
@@ -509,7 +642,7 @@ function checkLonely(room: Room) {
   const running =
     room.phase === 'await_call' || room.phase === 'hunting' || room.phase === 'wrapup';
 
-  if (!running || connectedPlayers(room).length >= 2) {
+  if (!running || enoughToPlay(room)) {
     if (room.timers.lonely) {
       clearTimeout(room.timers.lonely);
       room.timers.lonely = null;
@@ -520,7 +653,7 @@ function checkLonely(room: Room) {
 
   room.timers.lonely = setTimeout(() => {
     room.timers.lonely = null;
-    if (connectedPlayers(room).length >= 2) return;
+    if (enoughToPlay(room)) return;
     if (room.phase === 'wrapup') {
       // Nobody is left to finish those puzzles, so stop waiting on them.
       finalize(room, room.endReason ?? 'not_enough_players');
@@ -557,6 +690,8 @@ export function leaveMatch(room: Room, player: PlayerInternal) {
 }
 
 export function handleDisconnect(room: Room, player: PlayerInternal) {
+  // Whatever they were reading, they aren't any more.
+  setPaused(room, false);
   player.connected = false;
   player.socketId = null;
   player.disconnectedAt = Date.now();

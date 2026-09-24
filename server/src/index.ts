@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import express from 'express';
 import { Server } from 'socket.io';
-import { attachIo } from './game.js';
+import { attachIo, boardClick, callNumber, narrateBot, submitPuzzle } from './game.js';
+import { attachBotActions } from './bots.js';
 import { registerHandlers, startJanitor } from './handlers.js';
 import { rooms } from './state.js';
 
@@ -37,6 +38,9 @@ const io = new Server(http, {
 });
 
 attachIo(io);
+// Bots reach the game through the same entry points a socket does. Injecting them here
+// rather than importing `game.js` from `bots.js` keeps the two files acyclic.
+attachBotActions({ callNumber, boardClick, submitPuzzle, narrate: narrateBot });
 registerHandlers(io);
 startJanitor();
 

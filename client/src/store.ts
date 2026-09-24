@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  BotActivityPayload,
   GameOverPayload,
   NumberToken,
   Player,
@@ -12,6 +13,13 @@ export interface Toast {
   text: string;
   tone: 'good' | 'bad' | 'info';
 }
+
+export interface BotFeedItem extends BotActivityPayload {
+  id: number;
+}
+
+/** Only the newest few are ever on screen, so there's no reason to keep more. */
+const BOT_FEED_MAX = 4;
 
 interface AppState {
   connected: boolean;
@@ -26,6 +34,8 @@ interface AppState {
   puzzle: PuzzleView | null;
   matchLeftMs: number | null;
   phaseLeftMs: number | null;
+  /** The clocks are being held while a coach instruction is open. */
+  paused: boolean;
   lockedUntil: number;
   gameOver: GameOverPayload | null;
   /** Set once we deliberately walk out, so late state broadcasts can't drag us back. */
@@ -34,6 +44,8 @@ interface AppState {
   notice: string | null;
   /** Puzzles solved since the current window opened — resets when the turn moves on. */
   streak: number;
+  /** Practice only: newest first, what the bots have been up to. */
+  botFeed: BotFeedItem[];
   toasts: Toast[];
   error: string | null;
   speak: boolean;
@@ -49,8 +61,10 @@ interface AppState {
   setNotice: (v: string | null) => void;
   bumpStreak: () => void;
   resetStreak: () => void;
+  pushBotActivity: (a: BotActivityPayload) => void;
+  clearBotFeed: () => void;
   setPuzzle: (p: PuzzleView | null) => void;
-  setTick: (matchLeftMs: number | null, phaseLeftMs: number | null) => void;
+  setTick: (matchLeftMs: number | null, phaseLeftMs: number | null, paused: boolean) => void;
   lockBoard: (ms: number) => void;
   setGameOver: (g: GameOverPayload | null) => void;
   pushToast: (text: string, tone?: Toast['tone']) => void;
@@ -77,11 +91,13 @@ export const useStore = create<AppState>()((set, get) => ({
   puzzle: null,
   matchLeftMs: null,
   phaseLeftMs: null,
+  paused: false,
   lockedUntil: 0,
   gameOver: null,
   hasLeft: false,
   notice: null,
   streak: 0,
+  botFeed: [],
   toasts: [],
   error: null,
   speak: localStorage.getItem('nh.speak') !== 'off',
@@ -100,7 +116,7 @@ export const useStore = create<AppState>()((set, get) => ({
     if (room && get().hasLeft) return;
     if (room) sessionStorage.setItem('nh.room', room.code);
     // No room, or back in the lobby, means there is no board to show.
-    if (!room || room.phase === 'lobby') set({ room, tokens: [] });
+    if (!room || room.phase === 'lobby') set({ room, tokens: [], botFeed: [] });
     else set({ room });
   },
   setTokens: (tokens) => set({ tokens }),
@@ -119,8 +135,14 @@ export const useStore = create<AppState>()((set, get) => ({
   },
   bumpStreak: () => set((s) => ({ streak: s.streak + 1 })),
   resetStreak: () => set({ streak: 0 }),
+  pushBotActivity: (a) =>
+    set((s) => ({
+      botFeed: [{ ...a, id: ++toastSeq }, ...s.botFeed].slice(0, BOT_FEED_MAX),
+    })),
+  clearBotFeed: () => set({ botFeed: [] }),
   setPuzzle: (puzzle) => set({ puzzle }),
-  setTick: (matchLeftMs, phaseLeftMs) => set({ matchLeftMs, phaseLeftMs }),
+  setTick: (matchLeftMs, phaseLeftMs, paused) =>
+    set({ matchLeftMs, phaseLeftMs, paused }),
   lockBoard: (ms) => set({ lockedUntil: Date.now() + ms }),
   setGameOver: (gameOver) => set({ gameOver }),
   pushToast: (text, tone = 'info') => {

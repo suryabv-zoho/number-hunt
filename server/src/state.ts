@@ -22,11 +22,24 @@ export interface PlayerInternal {
   connected: boolean;
   /** Walked out on purpose — keeps their seat and score, but never plays again. */
   left: boolean;
+  /** Driven by `bots.ts` rather than a socket. Always "connected", never a host. */
+  isBot: boolean;
   socketId: string | null;
   /** Epoch ms until which board clicks are ignored (wrong-click lockout). */
   lockedUntil: number;
   disconnectedAt: number | null;
   stats: PlayerStats;
+}
+
+/**
+ * A bot action waiting to happen. It keeps its own due time so a paused practice match
+ * can stop the clock on it and put it back exactly where it was.
+ */
+export interface PendingBotAction {
+  timeout: NodeJS.Timeout | null;
+  /** Epoch ms it should run at. Shifted forward by however long the match was paused. */
+  dueAt: number;
+  run: () => void;
 }
 
 export interface PuzzleInternal {
@@ -41,6 +54,8 @@ export interface PuzzleInternal {
 export interface Room {
   code: string;
   hostId: string;
+  /** Solo match against bots: gentler pacing, no penalties, nobody else can join. */
+  practice: boolean;
   config: RoomConfig;
   players: Map<string, PlayerInternal>;
   /** Join order, which is also the round-robin turn order. */
@@ -74,6 +89,15 @@ export interface Room {
     /** Grace clock for a room that has dropped below two connected players. */
     lonely: NodeJS.Timeout | null;
   };
+  /** Every pending bot action, so a room teardown can't leave timers running. */
+  botTimers: Set<PendingBotAction>;
+  /**
+   * What the phase timer will do when it fires. Held so a pause can cancel the timer
+   * and re-arm the same outcome later, rather than having to re-derive it from `phase`.
+   */
+  phaseFn: (() => void) | null;
+  /** Practice only: epoch ms the clocks were held at, or null when running. */
+  pausedAt: number | null;
   createdAt: number;
 }
 
@@ -96,10 +120,11 @@ export function makeId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
 }
 
-export function createRoom(hostId: string): Room {
+export function createRoom(hostId: string, practice = false): Room {
   const room: Room = {
     code: makeRoomCode(),
     hostId,
+    practice,
     config: { ...DEFAULT_CONFIG },
     players: new Map(),
     order: [],
@@ -121,6 +146,9 @@ export function createRoom(hostId: string): Room {
     seed: 0,
     puzzleSeq: 0,
     timers: { phase: null, tick: null, lonely: null },
+    botTimers: new Set(),
+    phaseFn: null,
+    pausedAt: null,
     createdAt: Date.now(),
   };
   rooms.set(room.code, room);
@@ -134,7 +162,27 @@ export function newPlayer(id: string, name: string, socketId: string): PlayerInt
     score: 0,
     connected: true,
     left: false,
+    isBot: false,
     socketId,
+    lockedUntil: 0,
+    disconnectedAt: null,
+    stats: { puzzlesSolved: 0, numbersFound: 0, wrongClicks: 0 },
+  };
+}
+
+/**
+ * A bot seat. No socket, permanently "connected" — it can't drop out, so the match
+ * never stalls waiting for one, and `connectedPlayers` counts it as a body at the table.
+ */
+export function newBot(id: string, name: string): PlayerInternal {
+  return {
+    id,
+    name,
+    score: 0,
+    connected: true,
+    left: false,
+    isBot: true,
+    socketId: null,
     lockedUntil: 0,
     disconnectedAt: null,
     stats: { puzzlesSolved: 0, numbersFound: 0, wrongClicks: 0 },
@@ -149,6 +197,7 @@ export function toPublicPlayer(room: Room, p: PlayerInternal): Player {
     connected: p.connected,
     isHost: room.hostId === p.id,
     left: p.left,
+    isBot: p.isBot,
   };
 }
 
@@ -174,6 +223,7 @@ export function publicState(room: Room): RoomState {
     solving: [...room.puzzles.keys()],
     readyForNext: [...room.readyForNext],
     lastReveal: room.lastReveal,
+    practice: room.practice,
   };
 }
 
@@ -206,4 +256,16 @@ export function activePlayers(room: Room): PlayerInternal[] {
   return room.order
     .map((id) => room.players.get(id))
     .filter((p): p is PlayerInternal => !!p && !p.left);
+}
+
+/**
+ * The people, as opposed to the bots. A practice room is alive only while its one human
+ * is — bots are always "connected", so every liveness check has to ask this instead.
+ */
+export function humanPlayers(room: Room): PlayerInternal[] {
+  return [...room.players.values()].filter((p) => !p.isBot);
+}
+
+export function connectedHumans(room: Room): PlayerInternal[] {
+  return humanPlayers(room).filter((p) => p.connected && !p.left);
 }
