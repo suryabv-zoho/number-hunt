@@ -71,6 +71,10 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [view, setView] = useState<View>(FIT);
+  /** Always the current view. `view` from the render closure can be a frame behind a
+   *  zoom we just applied, and seeding a gesture from a stale view rewinds it. */
+  const viewRef = useRef<View>(FIT);
+  viewRef.current = view;
   /** Once the player zooms or pans themselves, stop re-deriving the default for them. */
   const userAdjusted = useRef(false);
   const revealStartedAt = useRef(0);
@@ -117,6 +121,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   }, []);
 
   const schedulePan = useCallback((next: View) => {
+    viewRef.current = next;
     pendingView.current = next;
     if (panRaf.current) return;
     panRaf.current = requestAnimationFrame(() => {
@@ -185,19 +190,23 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   const zoomAt = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {
       userAdjusted.current = true;
-      setView((v) => {
-        const canvas = canvasRef.current;
-        const next = { ...v, zoom: Math.min(MAX_ZOOM, Math.max(1, v.zoom * factor)) };
-        if (canvas && clientX !== undefined && clientY !== undefined) {
-          const rect = canvas.getBoundingClientRect();
-          const fit = Math.min(size.w / BOARD_W, size.h / BOARD_H);
-          const anchorX = (clientX - rect.left - size.w / 2) / (fit * v.zoom);
-          const anchorY = (clientY - rect.top - size.h / 2) / (fit * v.zoom);
-          next.px = v.px + anchorX * (1 - v.zoom / next.zoom);
-          next.py = v.py + anchorY * (1 - v.zoom / next.zoom);
-        }
-        return clampView(next);
-      });
+      // Read the mirror rather than using a functional update: a second pinch frame can
+      // arrive before React has re-rendered, and it must build on the zoom already
+      // applied, not on the one still sitting in the render closure.
+      const v = viewRef.current;
+      const canvas = canvasRef.current;
+      const next = { ...v, zoom: Math.min(MAX_ZOOM, Math.max(1, v.zoom * factor)) };
+      if (canvas && clientX !== undefined && clientY !== undefined) {
+        const rect = canvas.getBoundingClientRect();
+        const fit = Math.min(size.w / BOARD_W, size.h / BOARD_H);
+        const anchorX = (clientX - rect.left - size.w / 2) / (fit * v.zoom);
+        const anchorY = (clientY - rect.top - size.h / 2) / (fit * v.zoom);
+        next.px = v.px + anchorX * (1 - v.zoom / next.zoom);
+        next.py = v.py + anchorY * (1 - v.zoom / next.zoom);
+      }
+      const settled = clampView(next);
+      viewRef.current = settled;
+      setView(settled);
     },
     [size, clampView],
   );
@@ -358,7 +367,14 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   /* --------------------------------------------------------------- gestures */
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    try {
+      // Throws if the browser has no active pointer with this id. Optional chaining
+      // only guards a missing method, and letting it throw here would abort the
+      // handler before the pointer is registered, killing the whole gesture.
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    } catch {
+      // Capture is an optimisation, not a requirement.
+    }
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     const slop = e.pointerType === 'mouse' ? TAP_SLOP_MOUSE : TAP_SLOP_TOUCH;
@@ -368,7 +384,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
         startX: e.clientX,
         startY: e.clientY,
         moved: 0,
-        startView: view,
+        startView: viewRef.current,
         pinchDist: 0,
         slop,
       };
@@ -379,7 +395,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
         startX: (a.x + b.x) / 2,
         startY: (a.y + b.y) / 2,
         moved: Number.MAX_SAFE_INTEGER, // a pinch is never a tap
-        startView: view,
+        startView: viewRef.current,
         pinchDist: Math.hypot(a.x - b.x, a.y - b.y),
         slop,
       };
@@ -431,6 +447,25 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     const g = gesture.current;
     pointers.current.delete(e.pointerId);
+
+    if (pointers.current.size === 1) {
+      // One finger lifted off a pinch. The pinch gesture still holds the view from
+      // *before* the pinch, and the remaining finger always twitches a pixel or two
+      // before it leaves — which would replay that stale view and undo the zoom.
+      // Re-seed from where we actually are so the pinch sticks, and so the remaining
+      // finger simply carries on panning.
+      const [rest] = [...pointers.current.values()];
+      gesture.current = {
+        startX: rest.x,
+        startY: rest.y,
+        moved: Number.MAX_SAFE_INTEGER, // came from a pinch, so never a tap
+        startView: viewRef.current,
+        pinchDist: 0,
+        slop: g?.slop ?? TAP_SLOP_TOUCH,
+      };
+      pinchUntil.current = Date.now() + 600;
+      return;
+    }
 
     if (pointers.current.size === 0) {
       gesture.current = null;
