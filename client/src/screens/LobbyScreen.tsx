@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { RoomConfig } from '@game/shared';
+import {
+  MIN_CALLS_PER_PLAYER,
+  callsEach,
+  roomCapacity,
+  roundsInMatch,
+} from '@game/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,13 +22,16 @@ import {
 import {
   iconClose,
   iconCopy,
-  iconHost,
   iconGear,
+  iconHost,
+  iconInfo,
   iconLeave,
   iconPlayers,
   iconSettings,
   iconStart,
+  iconWarning,
 } from '@/icons';
+import { cn } from 'cn';
 import SettingsDialog from '@/components/SettingsDialog';
 import { useStore } from '../store.js';
 import { closeRoom, leaveRoom, sendConfig, startMatch } from '../socket.js';
@@ -32,6 +41,14 @@ export default function LobbyScreen() {
   const room = useStore((s) => s.room)!;
   const playerId = useStore((s) => s.playerId);
   const [copied, setCopied] = useState(false);
+
+  // Room size follows the match settings: a match holds a fixed number of rounds, and
+  // every extra player divides them further.
+  const seats = roomCapacity(room.config);
+  const rounds = roundsInMatch(room.config);
+  const perHead = Math.max(1, Math.floor(callsEach(room.config, seats)));
+  const full = room.players.length >= seats;
+  const shortTurns = perHead < MIN_CALLS_PER_PLAYER;
 
   const isHost = room.players.find((p) => p.id === playerId)?.isHost ?? false;
   const ready = room.players.filter((p) => p.connected).length >= 2;
@@ -119,7 +136,7 @@ export default function LobbyScreen() {
           <section className="space-y-3">
             <h3 className="flex items-center gap-2 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
               <FontAwesomeIcon icon={iconPlayers} />
-              Players ({room.players.length})
+              Players ({room.players.length}/{seats})
             </h3>
             <ul className="max-h-[30vh] space-y-1.5 overflow-y-auto pr-0.5 [scrollbar-width:thin]">
               {room.players.map((p, i) => (
@@ -151,6 +168,28 @@ export default function LobbyScreen() {
             <p className="text-xs text-muted-foreground">
               Turn order follows this list, top to bottom. Once the match starts, nobody
               new can join.
+            </p>
+
+            {/* The cap is a consequence of the settings, not an arbitrary limit, so say
+                which setting to move rather than just refusing people at the door. */}
+            <p
+              className={cn(
+                'flex items-start gap-2 rounded-lg px-3 py-2 text-sm font-bold',
+                full ? 'bg-tint-warning text-warning' : 'bg-surface text-muted-foreground',
+              )}
+            >
+              <FontAwesomeIcon icon={full ? iconWarning : iconInfo} className="mt-0.5" />
+              <span>
+                {full ? 'Room full. ' : ''}
+                These settings fit <b className="text-foreground tnum">{rounds}</b> rounds,
+                so <b className="text-foreground tnum">{seats}</b>{' '}
+                {seats === 1 ? 'player' : 'players'} each get about{' '}
+                <b className="text-foreground tnum">{perHead}</b>{' '}
+                {perHead === 1 ? 'turn' : 'turns'} to call.
+                {shortTurns
+                  ? ' A shorter find window or a longer match would give everyone more.'
+                  : ''}
+              </span>
             </p>
           </section>
 

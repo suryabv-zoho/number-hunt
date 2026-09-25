@@ -1,5 +1,11 @@
 import type { Server, Socket } from 'socket.io';
-import { C2S, S2C, DEFAULT_CONFIG, PRACTICE_CONFIG } from '@game/shared';
+import {
+  C2S,
+  S2C,
+  DEFAULT_CONFIG,
+  PRACTICE_CONFIG,
+  roomCapacity,
+} from '@game/shared';
 import type {
   BoardClickReq,
   CreateRoomReq,
@@ -95,6 +101,17 @@ function enter(socket: Socket, room: Room, name: string, wantedId?: string): Joi
   // Two people called "Meera" in one scoreboard helps nobody.
   if (isNameTaken(room, name, existing?.id)) {
     return { ok: false, error: `"${name}" is already taken in this room` };
+  }
+  // The room only seats as many as its settings can give a fair number of turns to.
+  // Practice sets its own table (one human, two bots) and never takes visitors.
+  if (!existing && !room.practice) {
+    const seats = roomCapacity(room.config);
+    if (room.players.size >= seats) {
+      return {
+        ok: false,
+        error: `That room is full — these settings seat ${seats}`,
+      };
+    }
   }
 
   let player: PlayerInternal;
@@ -202,7 +219,18 @@ export function registerHandlers(server: Server) {
       if (c.room.phase !== 'lobby' && c.room.phase !== 'ended') {
         return fail(socket, 'Settings are locked while a match is running');
       }
-      c.room.config = sanitizeConfig({ ...c.room.config, ...raw });
+      const next = sanitizeConfig({ ...c.room.config, ...raw });
+      // Settings decide the room size, so they can't be tightened below the people
+      // already sitting in it — that would leave the room over its own limit.
+      const seats = roomCapacity(next);
+      const here = c.room.players.size;
+      if (here > seats) {
+        return fail(
+          socket,
+          `${here} players are here, and those settings only seat ${seats}`,
+        );
+      }
+      c.room.config = next;
       broadcastState(c.room);
     });
 

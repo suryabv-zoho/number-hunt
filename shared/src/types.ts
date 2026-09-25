@@ -45,10 +45,16 @@ export interface RoomConfig {
   puzzleCharset: PuzzleCharset;
 }
 
+/**
+ * Tuned so a default room seats a real group. A 60-second find window leaves only ~12
+ * rounds in a 15-minute match, which is three players at three calls each — the first
+ * room anyone made would have turned their friends away. Thirty seconds doubles the
+ * rounds, and the board is thinned to match: 150 numbers are not findable in 30s.
+ */
 export const DEFAULT_CONFIG: RoomConfig = {
-  numberCount: 60,
+  numberCount: 50,
   matchMinutes: 15,
-  findSeconds: 60,
+  findSeconds: 30,
   puzzleLength: 6,
   puzzleCharset: 'alnum',
 };

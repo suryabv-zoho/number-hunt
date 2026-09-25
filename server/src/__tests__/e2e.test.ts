@@ -15,7 +15,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server as HttpServer } from 'node:http';
 import { Server as IoServer } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
-import { C2S, S2C, type JoinAck, type NumberToken, type RoomState } from '@game/shared';
+import {
+  C2S,
+  S2C,
+  roomCapacity,
+  type JoinAck,
+  type NumberToken,
+  type RoomState,
+} from '@game/shared';
 import {
   attachIo,
   boardClick,
@@ -719,5 +726,69 @@ describe('rubbish input', () => {
     expect(ack.ok).toBe(true);
     const state = await next<RoomState>(s, S2C.state, 1500).catch(() => null);
     void state;
+  });
+});
+
+/* --------------------------------------------------------------- room capacity */
+
+describe('room size', () => {
+  it('turns people away once the settings are full', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    // Two seats: the shortest match with the longest find window.
+    host.socket.emit(C2S.config, { matchMinutes: 5, findSeconds: 90 });
+    await waitUntil(() => host.state?.config.findSeconds === 90, 'the settings');
+    expect(roomCapacity(host.state!.config)).toBe(2);
+
+    await join('Second', code);
+    const third = await connect();
+    const ack = await ask<JoinAck>(third, C2S.joinRoom, { code, name: 'Third' });
+    expect(ack.ok).toBe(false);
+    expect(ack.error).toMatch(/full/i);
+  });
+
+  it('opens more seats when the host shortens the find window', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    host.socket.emit(C2S.config, { matchMinutes: 5, findSeconds: 90 });
+    await waitUntil(() => roomCapacity(host.state!.config) === 2, 'a two-seat room');
+    await join('Second', code);
+
+    host.socket.emit(C2S.config, { matchMinutes: 15, findSeconds: 30 });
+    await waitUntil(() => roomCapacity(host.state!.config) > 2, 'a bigger room');
+
+    const third = await join('Third', code);
+    expect(third.state!.players).toHaveLength(3);
+  });
+
+  it('will not let the host shrink the room below the people already in it', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    for (const name of ['B', 'C', 'D']) await join(name, code);
+    await waitUntil(() => host.state?.players.length === 4, 'four players');
+
+    const err = next<{ message: string }>(host.socket, S2C.error);
+    host.socket.emit(C2S.config, { matchMinutes: 5, findSeconds: 90 });
+    expect((await err).message).toMatch(/only seat/i);
+    // The settings must be left exactly as they were.
+    expect(host.state!.config.findSeconds).not.toBe(90);
+  });
+
+  it('lets a player who is already seated reconnect into a full room', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    host.socket.emit(C2S.config, { matchMinutes: 5, findSeconds: 90 });
+    await waitUntil(() => roomCapacity(host.state!.config) === 2, 'a two-seat room');
+    const guest = await join('Guest', code);
+
+    guest.socket.disconnect();
+    const again = await connect();
+    const ack = await ask<JoinAck>(again, C2S.joinRoom, {
+      code,
+      name: 'Guest',
+      playerId: guest.id,
+    });
+    // Full means no *new* faces; the seat holder still owns their chair.
+    expect(ack.ok).toBe(true);
   });
 });

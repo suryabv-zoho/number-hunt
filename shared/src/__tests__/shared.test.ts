@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { generateBoard, hitTest, tokenBounds, BOARD_W, BOARD_H } from '../board.js';
 import { generatePuzzle } from '../puzzle.js';
 import { scorePuzzle, applyDelta, PUZZLE_BASE_POINTS, PUZZLE_MAX_BONUS } from '../scoring.js';
+import {
+  MAX_ROOM_SIZE,
+  MIN_CALLS_PER_PLAYER,
+  MIN_ROOM_SIZE,
+  callsEach,
+  roomCapacity,
+} from '../capacity.js';
+import { DEFAULT_CONFIG, type RoomConfig } from '../types.js';
 
 describe('generateBoard', () => {
   it('produces the requested count with unique values', () => {
@@ -107,5 +115,49 @@ describe('scoring', () => {
     expect(applyDelta(0, -5)).toBe(-5);
     expect(applyDelta(-5, -2)).toBe(-7);
     expect(applyDelta(-7, 16)).toBe(9);
+  });
+});
+
+
+describe('room capacity', () => {
+  const cfg = (matchMinutes: number, findSeconds: number): RoomConfig => ({
+    ...DEFAULT_CONFIG,
+    matchMinutes,
+    findSeconds,
+  });
+
+  it('seats fewer people the longer each round takes', () => {
+    // Same match length; a longer find window means fewer rounds to share out.
+    expect(roomCapacity(cfg(15, 30))).toBeGreaterThan(roomCapacity(cfg(15, 60)));
+    expect(roomCapacity(cfg(15, 60))).toBeGreaterThan(roomCapacity(cfg(15, 90)));
+  });
+
+  it('seats more people the longer the match runs', () => {
+    expect(roomCapacity(cfg(30, 30))).toBeGreaterThan(roomCapacity(cfg(15, 30)));
+    expect(roomCapacity(cfg(15, 30))).toBeGreaterThan(roomCapacity(cfg(5, 30)));
+  });
+
+  it('gives everyone their minimum turns at the cap it hands out', () => {
+    for (const minutes of [10, 15, 30]) {
+      for (const find of [30, 45, 60, 90]) {
+        const c = cfg(minutes, find);
+        const seats = roomCapacity(c);
+        // The margin means the cap should comfortably clear the minimum, not scrape it.
+        expect(callsEach(c, seats)).toBeGreaterThanOrEqual(MIN_CALLS_PER_PLAYER);
+      }
+    }
+  });
+
+  it('always seats at least two, and never more than the lag ceiling', () => {
+    // Nothing can be played alone...
+    expect(roomCapacity(cfg(1, 120))).toBe(MIN_ROOM_SIZE);
+    // ...and no setting can open the door wide enough to swamp the server.
+    expect(roomCapacity(cfg(30, 15))).toBeLessThanOrEqual(MAX_ROOM_SIZE);
+  });
+
+  it('keeps the default room big enough for a normal group', () => {
+    expect(roomCapacity(DEFAULT_CONFIG)).toBeGreaterThanOrEqual(6);
+    expect(callsEach(DEFAULT_CONFIG, roomCapacity(DEFAULT_CONFIG)))
+      .toBeGreaterThanOrEqual(MIN_CALLS_PER_PLAYER);
   });
 });

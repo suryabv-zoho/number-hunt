@@ -4,3 +4,4 @@ export * from './rng.js';
 export * from './board.js';
 export * from './puzzle.js';
 export * from './scoring.js';
+export * from './capacity.js';
