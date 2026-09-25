@@ -3,6 +3,7 @@ import {
   C2S,
   S2C,
   DEFAULT_CONFIG,
+  LOBBY_SEAT_GRACE_MS,
   PRACTICE_CONFIG,
   roomCapacity,
 } from '@game/shared';
@@ -79,41 +80,49 @@ function fail(socket: Socket, message: string) {
 }
 
 /** Attach (or re-attach) a player to a room and this socket. */
-function enter(socket: Socket, room: Room, name: string, wantedId?: string): JoinAck {
-  const existing = wantedId ? room.players.get(wantedId) : undefined;
-  const inProgress = room.phase !== 'lobby';
-
+/**
+ * Everything that can stop somebody getting in, in one place — because it has to be
+ * asked twice: once when they knock, and again when the host lets them in. The room can
+ * fill up, or the match can start, while a request is sitting in the queue.
+ */
+function admissionError(
+  room: Room,
+  name: string,
+  existing: PlayerInternal | undefined,
+  wantedId?: string,
+): string | null {
   // Walking out is final. Losing your wifi is not.
   if (existing?.left || (wantedId && room.banned.has(wantedId))) {
-    return { ok: false, error: 'You left this room — you can\'t rejoin it' };
+    return "You left this room — you can't rejoin it";
   }
   // Practice is one person against the computer. The seat holder can still reconnect
   // after a refresh — `existing` covers that — but nobody new sits down. The human
   // count is what makes this safe to apply here: at creation the room has no people in
   // it yet, so the player it was made for isn't turned away from their own room.
   if (room.practice && !existing && humanPlayers(room).length > 0) {
-    return { ok: false, error: 'That code belongs to a practice match' };
+    return 'That code belongs to a practice match';
   }
   // A match is a closed table: reconnects only, no fresh faces mid-game.
-  if (inProgress && !existing) {
-    return { ok: false, error: 'That match has already started' };
+  if (room.phase !== 'lobby' && !existing) {
+    return 'That match has already started';
   }
   // Two people called "Meera" in one scoreboard helps nobody.
   if (isNameTaken(room, name, existing?.id)) {
-    return { ok: false, error: `"${name}" is already taken in this room` };
+    return `"${name}" is already taken in this room`;
   }
   // The room only seats as many as its settings can give a fair number of turns to.
   // Practice sets its own table (one human, two bots) and never takes visitors.
   if (!existing && !room.practice) {
     const seats = roomCapacity(room.config);
     if (room.players.size >= seats) {
-      return {
-        ok: false,
-        error: `That room is full — these settings seat ${seats}`,
-      };
+      return `That room is full — these settings seat ${seats}`;
     }
   }
+  return null;
+}
 
+/** Sit somebody down: a new player, or one coming back to a seat they already hold. */
+function seat(socket: Socket, room: Room, name: string, existing?: PlayerInternal): JoinAck {
   let player: PlayerInternal;
   if (existing) {
     // Reconnect: keep their score and stats, swap in the new socket.
@@ -122,6 +131,7 @@ function enter(socket: Socket, room: Room, name: string, wantedId?: string): Joi
     // 'disconnect' handler synchronously, and if the seat still pointed at it, the
     // handler would treat this as a genuine drop — in the lobby it would delete the
     // player out from under us and leave them a ghost in their own room.
+    releaseLobbyTimer(room, existing.id);
     const stale = existing.socketId;
     existing.connected = true;
     existing.socketId = socket.id;
@@ -149,6 +159,69 @@ function enter(socket: Socket, room: Room, name: string, wantedId?: string): Joi
   resendPrivate(room, player);
 
   return { ok: true, playerId: player.id, code: room.code };
+}
+
+/**
+ * The host's own seat, and reconnects, skip the queue entirely: creating a room is not
+ * a request to join it, and a refresh shouldn't need asking permission twice.
+ */
+function enter(socket: Socket, room: Room, name: string, wantedId?: string): JoinAck {
+  const existing = wantedId ? room.players.get(wantedId) : undefined;
+  const err = admissionError(room, name, existing, wantedId);
+  if (err) return { ok: false, error: err };
+  return seat(socket, room, name, existing);
+}
+
+/**
+ * Somebody has gone quiet in the lobby. Hold their seat for a moment rather than
+ * deleting it: losing a seat to a page refresh used to be survivable — you silently
+ * got a new one — but a room that admits people by invitation has no way to give it
+ * back, and a host who refreshed could be locked out of their own room.
+ */
+function holdLobbySeat(room: Room, player: PlayerInternal) {
+  player.connected = false;
+  player.socketId = null;
+  player.disconnectedAt = Date.now();
+  broadcastState(room);
+
+  clearTimeout(room.lobbyTimers.get(player.id));
+  room.lobbyTimers.set(
+    player.id,
+    setTimeout(() => {
+      room.lobbyTimers.delete(player.id);
+      const seat = room.players.get(player.id);
+      // They came back, or the match started around them.
+      if (!seat || seat.connected || room.phase !== 'lobby') return;
+      leaveRoom(room, seat);
+    }, LOBBY_SEAT_GRACE_MS),
+  );
+}
+
+function releaseLobbyTimer(room: Room, playerId: string) {
+  clearTimeout(room.lobbyTimers.get(playerId));
+  room.lobbyTimers.delete(playerId);
+}
+
+/**
+ * Turn away everyone still waiting. `by` names the host who did it; an empty name means
+ * nobody did — the room went away underneath them.
+ */
+function clearPending(room: Room, by: string) {
+  for (const req of room.pending.values()) {
+    io?.to(req.socketId).emit(S2C.declined, { by });
+  }
+  room.pending.clear();
+}
+
+/**
+ * A queue with nobody left to answer it is a set of people waiting on a door that will
+ * never open. The janitor reclaims the empty room a minute later; they should not spend
+ * that minute — or any longer — staring at a spinner.
+ */
+function clearPendingIfAbandoned(room: Room) {
+  if (room.pending.size === 0) return;
+  const anyoneToAnswer = [...room.players.values()].some((p) => !p.isBot && !p.left);
+  if (!anyoneToAnswer) clearPending(room, '');
 }
 
 let io: Server | null = null;
@@ -208,7 +281,36 @@ export function registerHandlers(server: Server) {
         ack?.({ ok: false, error: `No room "${code}"` });
         return;
       }
-      ack?.(enter(socket, room, cleanName(req?.name), req?.playerId));
+      const name = cleanName(req?.name);
+      const existing = req?.playerId ? room.players.get(req.playerId) : undefined;
+
+      const err = admissionError(room, name, existing, req?.playerId);
+      if (err) {
+        ack?.({ ok: false, error: err });
+        return;
+      }
+
+      // Somebody coming back to a seat they already hold is not a new guest.
+      if (existing) {
+        ack?.(seat(socket, room, name, existing));
+        return;
+      }
+
+      // Everyone else waits at the door until the host says yes.
+      const previous = [...room.pending.values()].find((p) => p.socketId === socket.id);
+      if (previous) {
+        ack?.({ ok: true, pending: true, requestId: previous.requestId, code: room.code });
+        return;
+      }
+      const requestId = makeId('req');
+      room.pending.set(requestId, {
+        requestId,
+        socketId: socket.id,
+        name,
+        since: Date.now(),
+      });
+      broadcastState(room);
+      ack?.({ ok: true, pending: true, requestId, code: room.code });
     });
 
     socket.on(C2S.config, (raw: Partial<RoomConfig>) => {
@@ -240,7 +342,10 @@ export function registerHandlers(server: Server) {
       if (c.room.practice) return; // started on creation, and there is no lobby
       if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can start');
       const err = startMatch(c.room);
-      if (err) fail(socket, err);
+      if (err) return fail(socket, err);
+      // No fresh faces once a match is running, so the queue can't just sit there.
+      clearPending(c.room, c.player.name);
+      broadcastState(c.room);
     });
 
     socket.on(C2S.acceptRematch, () => {
@@ -293,6 +398,9 @@ export function registerHandlers(server: Server) {
       const { room } = c;
       stopTimers(room);
       forgetBots(room);
+      clearPending(room, c.player.name);
+      for (const t of room.lobbyTimers.values()) clearTimeout(t);
+      room.lobbyTimers.clear();
       io?.to(room.code).emit(S2C.roomClosed, { by: c.player.name });
       for (const sid of [...room.players.values()].map((p) => p.socketId)) {
         if (!sid) continue;
@@ -304,6 +412,72 @@ export function registerHandlers(server: Server) {
         }
       }
       rooms.delete(room.code);
+    });
+
+    socket.on(C2S.admit, (req: { requestId?: string }) => {
+      const c = ctx(socket);
+      if (!c) return;
+      if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can admit players');
+      const request = c.room.pending.get(String(req?.requestId ?? ''));
+      if (!request) return;
+      c.room.pending.delete(request.requestId);
+
+      const guest = io?.sockets.sockets.get(request.socketId);
+      if (!guest) {
+        // They gave up waiting and closed the tab.
+        broadcastState(c.room);
+        return;
+      }
+      // Asked again, because the room may have filled or the match started while they
+      // were in the queue.
+      const err = admissionError(c.room, request.name, undefined);
+      if (err) {
+        guest.emit(S2C.declined, { by: c.player.name });
+        guest.emit(S2C.error, { message: err });
+        broadcastState(c.room);
+        return;
+      }
+      const ack = seat(guest, c.room, request.name);
+      guest.emit(S2C.admitted, ack);
+    });
+
+    socket.on(C2S.decline, (req: { requestId?: string }) => {
+      const c = ctx(socket);
+      if (!c) return;
+      if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can admit players');
+      const request = c.room.pending.get(String(req?.requestId ?? ''));
+      if (!request) return;
+      c.room.pending.delete(request.requestId);
+      io?.to(request.socketId).emit(S2C.declined, { by: c.player.name });
+      broadcastState(c.room);
+    });
+
+    socket.on(C2S.kick, (req: { playerId?: string }) => {
+      const c = ctx(socket);
+      if (!c) return;
+      if (c.room.hostId !== c.player.id) return fail(socket, 'Only the host can remove players');
+      const target = c.room.players.get(String(req?.playerId ?? ''));
+      if (!target || target.id === c.player.id || target.isBot) return;
+
+      // Barred by id, so they cannot simply rejoin with the same code.
+      c.room.banned.add(target.id);
+      const sock = target.socketId ? io?.sockets.sockets.get(target.socketId) : null;
+      if (sock) {
+        sock.emit(S2C.kicked, { by: c.player.name });
+        sock.leave(c.room.code);
+        (sock.data as SocketData).roomCode = undefined;
+        (sock.data as SocketData).playerId = undefined;
+      }
+
+      if (c.room.phase === 'lobby') {
+        // Nothing to preserve yet, so the seat just disappears.
+        leaveRoom(c.room, target);
+      } else {
+        // Mid-match they keep their score on the final board, like any walk-out.
+        leaveMatch(c.room, target);
+        passHostIfNeeded(c.room);
+        broadcastState(c.room);
+      }
     });
 
     socket.on(C2S.coachPause, (req: { paused?: boolean }) => {
@@ -352,13 +526,22 @@ export function registerHandlers(server: Server) {
     });
 
     socket.on('disconnect', () => {
+      // They may have been queued rather than seated, in which case there is no ctx.
+      for (const room of rooms.values()) {
+        for (const [id, req] of room.pending) {
+          if (req.socketId !== socket.id) continue;
+          room.pending.delete(id);
+          broadcastState(room);
+        }
+      }
+
       const c = ctx(socket);
       if (!c) return;
       // Ignore a stale socket that was already replaced by a reconnect.
       if (c.player.socketId && c.player.socketId !== socket.id) return;
 
       if (c.room.phase === 'lobby') {
-        leaveRoom(c.room, c.player);
+        holdLobbySeat(c.room, c.player);
         return;
       }
       handleDisconnect(c.room, c.player);
@@ -368,10 +551,15 @@ export function registerHandlers(server: Server) {
   });
 }
 
+/** Exposed for tests that need to fire the lobby grace clock without waiting for it. */
+export { leaveRoom as leaveRoomForTest };
+
 function leaveRoom(room: Room, player: PlayerInternal) {
+  releaseLobbyTimer(room, player.id);
   room.players.delete(player.id);
   room.order = room.order.filter((id) => id !== player.id);
   room.puzzles.delete(player.id);
+  clearPendingIfAbandoned(room);
 
   // A practice room is that one person's room. Once they're gone it is just two bots
   // playing to an empty chair, so it goes now rather than waiting on the janitor.
@@ -411,6 +599,10 @@ export function startJanitor() {
         if (now - room.createdAt > 60_000) {
           stopTimers(room);
           forgetBots(room);
+          // Anyone still knocking is knocking on a room about to stop existing.
+          clearPending(room, '');
+          for (const t of room.lobbyTimers.values()) clearTimeout(t);
+          room.lobbyTimers.clear();
           rooms.delete(code);
           console.log(`[room ${code}] reclaimed`);
         }

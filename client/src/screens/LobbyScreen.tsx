@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  iconAccept,
   iconClose,
   iconCopy,
   iconGear,
@@ -29,12 +30,21 @@ import {
   iconPlayers,
   iconSettings,
   iconStart,
+  iconWaiting,
   iconWarning,
 } from '@/icons';
 import { cn } from 'cn';
 import SettingsDialog from '@/components/SettingsDialog';
 import { useStore } from '../store.js';
-import { closeRoom, leaveRoom, sendConfig, startMatch } from '../socket.js';
+import {
+  admitPlayer,
+  closeRoom,
+  declinePlayer,
+  kickPlayer,
+  leaveRoom,
+  sendConfig,
+  startMatch,
+} from '../socket.js';
 
 export default function LobbyScreen() {
   const [showSettings, setShowSettings] = useState(false);
@@ -162,6 +172,18 @@ export default function LobbyScreen() {
                     </Badge>
                   )}
                   {!p.connected && <Badge variant="secondary">Away</Badge>}
+                  {/* The host can clear a seat — but never their own. */}
+                  {isHost && p.id !== playerId && (
+                    <Button
+                      variant="ghost"
+                      aria-label={`Remove ${p.name}`}
+                      title={`Remove ${p.name}`}
+                      className="size-8 shrink-0 rounded-full p-0 text-muted-foreground hover:bg-tint-danger hover:text-destructive"
+                      onClick={() => kickPlayer(p.id)}
+                    >
+                      <FontAwesomeIcon icon={iconClose} />
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -169,6 +191,54 @@ export default function LobbyScreen() {
               Turn order follows this list, top to bottom. Once the match starts, nobody
               new can join.
             </p>
+
+            {/* Everyone who has knocked. Only the host can answer, but everyone sees
+                the queue — it explains why the room isn't starting yet. */}
+            {room.pending.length > 0 && (
+              <div className="animate-rise space-y-1.5 rounded-lg border-2 border-primary bg-tint-primary p-3">
+                <h4 className="flex items-center gap-2 text-xs font-extrabold tracking-[0.15em] text-primary uppercase">
+                  <FontAwesomeIcon icon={iconWaiting} />
+                  waiting to join ({room.pending.length})
+                </h4>
+                <ul className="space-y-1.5">
+                  {room.pending.map((req) => (
+                    <li
+                      key={req.requestId}
+                      className="flex items-center gap-2 rounded-lg bg-card px-3 py-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-base font-bold">
+                        {req.name}
+                      </span>
+                      {isHost ? (
+                        <>
+                          <Button
+                            aria-label={`Let ${req.name} in`}
+                            disabled={full}
+                            className="h-9 px-3 text-sm font-extrabold"
+                            onClick={() => admitPlayer(req.requestId)}
+                          >
+                            <FontAwesomeIcon icon={iconAccept} />
+                            {full ? 'Full' : 'Let in'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            aria-label={`Turn ${req.name} away`}
+                            className="size-9 shrink-0 rounded-full p-0 text-muted-foreground hover:bg-tint-danger hover:text-destructive"
+                            onClick={() => declinePlayer(req.requestId)}
+                          >
+                            <FontAwesomeIcon icon={iconClose} />
+                          </Button>
+                        </>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          waiting for the host
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* The cap is a consequence of the settings, not an arbitrary limit, so say
                 which setting to move rather than just refusing people at the door. */}

@@ -6,6 +6,7 @@ import { iconOffline } from '@/icons';
 import { useStore } from './store.js';
 import { primeSpeech } from './speech.js';
 import HomeScreen from './screens/HomeScreen.js';
+import WaitingRoom from './screens/WaitingRoom.js';
 import LobbyScreen from './screens/LobbyScreen.js';
 import GameScreen from './screens/GameScreen.js';
 import ResultsScreen from './screens/ResultsScreen.js';
@@ -14,6 +15,7 @@ import CoachOverlay from './components/CoachOverlay.js';
 
 export default function App() {
   const room = useStore((s) => s.room);
+  const waitingFor = useStore((s) => s.waitingFor);
   const connected = useStore((s) => s.connected);
 
   // Browsers won't let a page make noise until someone has interacted with it, and by
@@ -31,7 +33,11 @@ export default function App() {
 
   let screen: ReactElement;
   let key: string;
-  if (!room) {
+  if (waitingFor && !room) {
+    // Knocked, but not yet let in.
+    screen = <WaitingRoom />;
+    key = 'waiting';
+  } else if (!room) {
     screen = <HomeScreen />;
     key = 'home';
   } else if (room.phase === 'lobby') {

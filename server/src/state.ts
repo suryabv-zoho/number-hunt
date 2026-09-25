@@ -81,6 +81,12 @@ export interface Room {
   readyForNext: Set<string>;
   /** Ids that walked out. Kept after their seat is cleared so they can't sneak back. */
   banned: Set<string>;
+  /**
+   * People who have asked to join and are waiting on the host. They are deliberately
+   * not in `players`: no seat, no turn, and they don't count against the room's size
+   * until they are actually let in.
+   */
+  pending: Map<string, { requestId: string; socketId: string; name: string; since: number }>;
   seed: number;
   puzzleSeq: number;
   timers: {
@@ -91,6 +97,11 @@ export interface Room {
   };
   /** Every pending bot action, so a room teardown can't leave timers running. */
   botTimers: Set<PendingBotAction>;
+  /**
+   * Grace clocks for lobby seats whose player has gone quiet. A refresh takes a second;
+   * a closed tab shouldn't hold a seat all evening, especially now the room has a size.
+   */
+  lobbyTimers: Map<string, NodeJS.Timeout>;
   /**
    * What the phase timer will do when it fires. Held so a pause can cancel the timer
    * and re-arm the same outcome later, rather than having to re-derive it from `phase`.
@@ -143,10 +154,12 @@ export function createRoom(hostId: string, practice = false): Room {
     endReason: null,
     readyForNext: new Set(),
     banned: new Set(),
+    pending: new Map(),
     seed: 0,
     puzzleSeq: 0,
     timers: { phase: null, tick: null, lonely: null },
     botTimers: new Set(),
+    lobbyTimers: new Map(),
     phaseFn: null,
     pausedAt: null,
     createdAt: Date.now(),
@@ -224,6 +237,11 @@ export function publicState(room: Room): RoomState {
     readyForNext: [...room.readyForNext],
     lastReveal: room.lastReveal,
     practice: room.practice,
+    pending: [...room.pending.values()].map((p) => ({
+      requestId: p.requestId,
+      name: p.name,
+      since: p.since,
+    })),
   };
 }
 

@@ -2,6 +2,8 @@ import { io, type Socket } from 'socket.io-client';
 import { C2S, S2C } from '@game/shared';
 import type {
   BoardInitPayload,
+  DeclinedPayload,
+  KickedPayload,
   BotActivityPayload,
   BoardRemovePayload,
   BoardWrongPayload,
@@ -145,6 +147,41 @@ socket.on(S2C.gameOver, (p: GameOverPayload) => {
   store().setPuzzle(null);
 });
 
+/** The host let us in: adopt the seat they just gave us. */
+socket.on(S2C.admitted, (ack: JoinAck) => {
+  const s = store();
+  // The name we actually knocked with. Falling back to the store here would pick up
+  // whatever this browser last played as — `nh.name` in localStorage is shared across
+  // tabs — and we would be seated under one name while believing we were another, then
+  // rename ourselves on the next refresh.
+  const name = s.waitingFor?.name ?? sessionStorage.getItem('nh.name') ?? s.name;
+  s.setWaitingFor(null);
+  if (ack.ok && ack.playerId) s.setIdentity(ack.playerId, name);
+});
+
+socket.on(S2C.declined, (p: DeclinedPayload) => {
+  const s = store();
+  s.setWaitingFor(null);
+  sessionStorage.removeItem('nh.room');
+  // No name means nobody turned us away — the room itself went.
+  s.setNotice(
+    p.by ? `${p.by} didn't let you into the room.` : 'That room is no longer available.',
+  );
+});
+
+socket.on(S2C.kicked, (p: KickedPayload) => {
+  const s = store();
+  // Same teardown as walking out: the seat is gone and can't be reclaimed.
+  sessionStorage.removeItem('nh.room');
+  sessionStorage.removeItem('nh.playerId');
+  s.setHasLeft(true);
+  s.setWaitingFor(null);
+  s.setPuzzle(null);
+  s.setGameOver(null);
+  s.setRoom(null);
+  s.setNotice(`${p.by} removed you from the room.`);
+});
+
 socket.on(S2C.roomClosed, (p: RoomClosedPayload) => {
   const s = store();
   coach().stop();
@@ -197,10 +234,25 @@ export function joinRoom(code: string, name: string, playerId?: string): Promise
   store().setHasLeft(false);
   return new Promise((resolve) =>
     socket.emit(C2S.joinRoom, { code, name, playerId }, (ack: JoinAck) => {
-      if (ack.ok) store().setHasLeft(false);
+      if (ack.ok) {
+        store().setHasLeft(false);
+        // Accepted into the queue, not the room — the host still has to say yes.
+        store().setWaitingFor(ack.pending ? { code, name } : null);
+      }
       resolve(ack);
     }),
   );
+}
+
+export const admitPlayer = (requestId: string) => socket.emit(C2S.admit, { requestId });
+export const declinePlayer = (requestId: string) => socket.emit(C2S.decline, { requestId });
+export const kickPlayer = (playerId: string) => socket.emit(C2S.kick, { playerId });
+
+/** Give up waiting at the door and go back to the home screen. */
+export function stopWaiting() {
+  socket.emit(C2S.leave);
+  sessionStorage.removeItem('nh.room');
+  store().setWaitingFor(null);
 }
 
 /**
@@ -223,6 +275,7 @@ export const submitPuzzle = (puzzleId: string, order: string[]) =>
 export function leaveRoom() {
   socket.emit(C2S.leave);
   coach().stop();
+  store().setWaitingFor(null);
   store().setHasLeft(true);
   // Drop the identity too, so the auto-rejoin on the next connect doesn't try to walk
   // back into a match we deliberately walked out of.

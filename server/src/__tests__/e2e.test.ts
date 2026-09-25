@@ -33,7 +33,8 @@ import {
 } from '../game.js';
 import { attachBotActions } from '../bots.js';
 import { registerHandlers } from '../handlers.js';
-import { rooms } from '../state.js';
+import { newPlayer, rooms } from '../state.js';
+import { leaveRoomForTest } from '../handlers.js';
 
 let http: HttpServer;
 let io: IoServer;
@@ -150,7 +151,11 @@ interface Client {
   state: RoomState | null;
 }
 
-async function join(name: string, code?: string): Promise<Client> {
+/**
+ * Join a room. Everyone but the host now waits at the door, so a join needs whoever is
+ * holding the room to let them in — pass the host client as the third argument.
+ */
+async function join(name: string, code?: string, host?: Client): Promise<Client> {
   const socket = await connect();
   const c: Client = { socket, id: '', tokens: [], state: null };
   socket.on(S2C.boardInit, (p: { tokens: NumberToken[] }) => (c.tokens = p.tokens));
@@ -165,7 +170,20 @@ async function join(name: string, code?: string): Promise<Client> {
     code ? { code, name } : { name },
   );
   if (!ack.ok) throw new Error(ack.error ?? 'join failed');
-  c.id = ack.playerId!;
+
+  if (ack.pending) {
+    if (!host) throw new Error(`"${name}" is queued and no host was given to admit them`);
+    await waitUntil(
+      () => !!host.state?.pending.some((r) => r.name === name),
+      `${name}'s request to reach the host`,
+    );
+    const request = host.state!.pending.find((r) => r.name === name)!;
+    const admitted = next<JoinAck>(socket, S2C.admitted);
+    host.socket.emit(C2S.admit, { requestId: request.requestId });
+    c.id = (await admitted).playerId!;
+  } else {
+    c.id = ack.playerId!;
+  }
   return c;
 }
 
@@ -182,7 +200,7 @@ function solve(c: Client, pz: { id: string; target: string; tiles: { id: string;
 async function startedMatch(config: Record<string, unknown> = {}) {
   const host = await join('Host');
   const code = host.state!.code;
-  const guest = await join('Guest', code);
+  const guest = await join('Guest', code, host);
   const wanted = { numberCount: 20, matchMinutes: 5, ...config };
   host.socket.emit(C2S.config, wanted);
   await waitUntil(() => host.state?.config.numberCount === wanted.numberCount, 'config');
@@ -310,7 +328,7 @@ describe('getting in', () => {
 
   it('lets only the host change settings or start', async () => {
     const host = await join('Host');
-    const guest = await join('Guest', host.state!.code);
+    const guest = await join('Guest', host.state!.code, host);
 
     const configErr = next<{ message: string }>(guest.socket, S2C.error);
     guest.socket.emit(C2S.config, { numberCount: 150 });
@@ -323,7 +341,7 @@ describe('getting in', () => {
 
   it('merges config deltas instead of clobbering them', async () => {
     const host = await join('Host');
-    await join('Guest', host.state!.code);
+    await join('Guest', host.state!.code, host);
     host.socket.emit(C2S.config, { numberCount: 40 });
     await waitUntil(() => host.state?.config.numberCount === 40, 'the first change');
     host.socket.emit(C2S.config, { puzzleLength: 8 });
@@ -440,7 +458,7 @@ describe('coming and going', () => {
 
   it('tells everyone when the host closes the room', async () => {
     const host = await join('Host');
-    const guest = await join('Guest', host.state!.code);
+    const guest = await join('Guest', host.state!.code, host);
     const closed = next<{ by: string }>(guest.socket, S2C.roomClosed);
     host.socket.emit(C2S.closeRoom);
     expect((await closed).by).toBe('Host');
@@ -449,7 +467,7 @@ describe('coming and going', () => {
 
   it('lets only the host close the room', async () => {
     const host = await join('Host');
-    const guest = await join('Guest', host.state!.code);
+    const guest = await join('Guest', host.state!.code, host);
     const err = next<{ message: string }>(guest.socket, S2C.error);
     guest.socket.emit(C2S.closeRoom);
     expect((await err).message).toMatch(/only the host/i);
@@ -458,8 +476,8 @@ describe('coming and going', () => {
 
   it('hands the room to someone else when the host drops', async () => {
     const host = await join('Host');
-    const guest = await join('Guest', host.state!.code);
-    const third = await join('Third', host.state!.code);
+    const guest = await join('Guest', host.state!.code, host);
+    const third = await join('Third', host.state!.code, host);
     host.socket.emit(C2S.start);
     await waitUntil(() => guest.state?.phase === 'await_call', 'the start');
 
@@ -482,7 +500,7 @@ describe('coming and going', () => {
 /* ----------------------------------------------------------------- practice */
 
 describe('practice', () => {
-  async function practice(name = 'Learner') {
+  async function practice(config: Record<string, unknown> = {}, name = 'Learner') {
     const socket = await connect();
     const c: Client = { socket, id: '', tokens: [], state: null };
     socket.on(S2C.boardInit, (p: { tokens: NumberToken[] }) => (c.tokens = p.tokens));
@@ -491,6 +509,11 @@ describe('practice', () => {
     if (!ack.ok) throw new Error(ack.error);
     c.id = ack.playerId!;
     await waitUntil(() => c.state?.phase === 'await_call' && c.tokens.length > 0, 'the match');
+    // Practice settings are fixed over the wire, so shorten the round from the inside.
+    if (Object.keys(config).length) {
+      const room = rooms.get(c.state!.code)!;
+      room.config = { ...room.config, ...config } as typeof room.config;
+    }
     return c;
   }
 
@@ -559,18 +582,38 @@ describe('practice', () => {
     expect(tick.paused).not.toBe(true);
   });
 
-  it('bots take a turn and hunt on their own', async () => {
+  it('bots hunt on their own, with no socket behind them', async () => {
     const me = await practice();
-    // Hand the turn over by calling, then let the round resolve to a bot.
+    // Every non-calling bot either finds the number or gives up on it, and says so.
+    // Asserting on a *find* would be flaky: bots miss on purpose, some of the time.
+    const acted: string[] = [];
+    me.socket.on(S2C.botActivity, (p: { kind: string }) => acted.push(p.kind));
+
     click(me, me.tokens[0]);
     await waitUntil(() => me.state?.phase === 'hunting', 'the hunt');
-    // A bot should find the number without any help from a socket.
     await waitUntil(
-      () => (me.state?.foundBy.length ?? 0) > 0,
-      'a bot to find the number',
+      () => acted.some((k) => k === 'found' || k === 'gaveup' || k === 'wrong'),
+      'a bot to act on the board',
       30_000,
     );
   }, 35_000);
+
+  it('hands the turn to a bot, which calls a number by itself', async () => {
+    const me = await practice({ findSeconds: 15 });
+    click(me, me.tokens[0]);
+    await waitUntil(() => me.state?.phase === 'hunting', 'my round');
+
+    // Let my round run out; the rotation then reaches a bot, which always calls.
+    await waitUntil(
+      () =>
+        me.state?.phase === 'hunting' &&
+        !!me.state?.currentCallerId &&
+        me.state.currentCallerId !== me.id,
+      'a bot to take its turn and call',
+      40_000,
+    );
+    expect(me.state!.calledValue).not.toBeNull();
+  }, 45_000);
 });
 
 /* -------------------------------------------------------- rematch and abuse */
@@ -740,7 +783,7 @@ describe('room size', () => {
     await waitUntil(() => host.state?.config.findSeconds === 90, 'the settings');
     expect(roomCapacity(host.state!.config)).toBe(2);
 
-    await join('Second', code);
+    await join('Second', code, host);
     const third = await connect();
     const ack = await ask<JoinAck>(third, C2S.joinRoom, { code, name: 'Third' });
     expect(ack.ok).toBe(false);
@@ -752,19 +795,19 @@ describe('room size', () => {
     const code = host.state!.code;
     host.socket.emit(C2S.config, { matchMinutes: 5, findSeconds: 90 });
     await waitUntil(() => roomCapacity(host.state!.config) === 2, 'a two-seat room');
-    await join('Second', code);
+    await join('Second', code, host);
 
     host.socket.emit(C2S.config, { matchMinutes: 15, findSeconds: 30 });
     await waitUntil(() => roomCapacity(host.state!.config) > 2, 'a bigger room');
 
-    const third = await join('Third', code);
+    const third = await join('Third', code, host);
     expect(third.state!.players).toHaveLength(3);
   });
 
   it('will not let the host shrink the room below the people already in it', async () => {
     const host = await join('Host');
     const code = host.state!.code;
-    for (const name of ['B', 'C', 'D']) await join(name, code);
+    for (const name of ['B', 'C', 'D']) await join(name, code, host);
     await waitUntil(() => host.state?.players.length === 4, 'four players');
 
     const err = next<{ message: string }>(host.socket, S2C.error);
@@ -779,7 +822,7 @@ describe('room size', () => {
     const code = host.state!.code;
     host.socket.emit(C2S.config, { matchMinutes: 5, findSeconds: 90 });
     await waitUntil(() => roomCapacity(host.state!.config) === 2, 'a two-seat room');
-    const guest = await join('Guest', code);
+    const guest = await join('Guest', code, host);
 
     guest.socket.disconnect();
     const again = await connect();
@@ -790,5 +833,246 @@ describe('room size', () => {
     });
     // Full means no *new* faces; the seat holder still owns their chair.
     expect(ack.ok).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------- at the door */
+
+describe('waiting to be let in', () => {
+  /** Knock without being admitted, so the request is left sitting in the queue. */
+  async function knock(code: string, name: string) {
+    const socket = await connect();
+    const ack = await ask<JoinAck>(socket, C2S.joinRoom, { code, name });
+    return { socket, ack };
+  }
+
+  it('queues a newcomer instead of seating them', async () => {
+    const host = await join('Host');
+    const { ack } = await knock(host.state!.code, 'Guest');
+
+    // Nothing went wrong — they are simply waiting.
+    expect(ack.ok).toBe(true);
+    expect(ack.pending).toBe(true);
+    expect(ack.playerId).toBeUndefined();
+
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+    expect(host.state!.pending[0].name).toBe('Guest');
+    // A queued player holds no seat.
+    expect(host.state!.players).toHaveLength(1);
+  });
+
+  it('seats them when the host says yes', async () => {
+    const host = await join('Host');
+    const { socket } = await knock(host.state!.code, 'Guest');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+
+    const admitted = next<JoinAck>(socket, S2C.admitted);
+    host.socket.emit(C2S.admit, { requestId: host.state!.pending[0].requestId });
+    const ack = await admitted;
+
+    expect(ack.ok).toBe(true);
+    expect(ack.playerId).toBeTruthy();
+    await waitUntil(() => host.state?.players.length === 2, 'the new seat');
+    expect(host.state!.pending).toHaveLength(0);
+  });
+
+  it('turns them away when the host says no', async () => {
+    const host = await join('Host');
+    const { socket } = await knock(host.state!.code, 'Guest');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+
+    const declined = next<{ by: string }>(socket, S2C.declined);
+    host.socket.emit(C2S.decline, { requestId: host.state!.pending[0].requestId });
+    expect((await declined).by).toBe('Host');
+
+    await waitUntil(() => host.state?.pending.length === 0, 'an empty queue');
+    expect(host.state!.players).toHaveLength(1);
+  });
+
+  it('lets only the host answer the door', async () => {
+    const host = await join('Host');
+    const guest = await join('Guest', host.state!.code, host);
+    await knock(host.state!.code, 'Third');
+    await waitUntil(() => guest.state?.pending.length === 1, 'the request');
+
+    const err = next<{ message: string }>(guest.socket, S2C.error);
+    guest.socket.emit(C2S.admit, { requestId: guest.state!.pending[0].requestId });
+    expect((await err).message).toMatch(/only the host/i);
+    expect(guest.state!.players).toHaveLength(2);
+  });
+
+  it('drops the request if they give up and close the tab', async () => {
+    const host = await join('Host');
+    const { socket } = await knock(host.state!.code, 'Guest');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+    socket.disconnect();
+    await waitUntil(() => host.state?.pending.length === 0, 'the queue to clear');
+  });
+
+  it('turns the queue away when the match starts without them', async () => {
+    const host = await join('Host');
+    await join('Guest', host.state!.code, host);
+    const { socket } = await knock(host.state!.code, 'Latecomer');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+
+    const declined = next<{ by: string }>(socket, S2C.declined);
+    host.socket.emit(C2S.start);
+    await declined;
+    await waitUntil(() => host.state?.pending.length === 0, 'an empty queue');
+  });
+
+  it('turns the queue away when the host closes the room', async () => {
+    const host = await join('Host');
+    const { socket } = await knock(host.state!.code, 'Guest');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+
+    const declined = next<{ by: string }>(socket, S2C.declined);
+    host.socket.emit(C2S.closeRoom);
+    await declined;
+  });
+
+  it('stops the wait when the last player leaves the room behind', async () => {
+    const host = await join('Host');
+    const { socket } = await knock(host.state!.code, 'Guest');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+
+    // Nobody is left who could ever answer the door.
+    const declined = next<{ by: string }>(socket, S2C.declined);
+    host.socket.emit(C2S.leave);
+    const p = await declined;
+    // No name: nobody turned them away, the room went.
+    expect(p.by).toBe('');
+  });
+
+  it('stops the wait when the host is removed by the grace clock', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    const { socket } = await knock(code, 'Guest');
+    await waitUntil(() => host.state?.pending.length === 1, 'the request');
+
+    // The host closes their tab rather than leaving: the seat is held, then dropped.
+    host.socket.disconnect();
+    const room = rooms.get(code)!;
+    expect(room.pending.size).toBe(1);
+
+    const declined = next<{ by: string }>(socket, S2C.declined, 3000);
+    // Fire the grace clock rather than waiting 45 real seconds for it.
+    for (const t of room.lobbyTimers.values()) clearTimeout(t);
+    room.lobbyTimers.clear();
+    const seat = [...room.players.values()][0];
+    seat.connected = false;
+    leaveRoomForTest(room, seat);
+    await declined;
+  });
+
+  it('still refuses at the door rather than queueing a hopeless request', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    // A name clash is knowable immediately, so it should not waste the host's time.
+    const { ack } = await knock(code, 'Host');
+    expect(ack.ok).toBe(false);
+    expect(ack.pending).toBeUndefined();
+    expect(host.state!.pending).toHaveLength(0);
+  });
+});
+
+describe('removing a player', () => {
+  it('clears their seat in the lobby and bars them from coming back', async () => {
+    const host = await join('Host');
+    const guest = await join('Guest', host.state!.code, host);
+
+    const kicked = next<{ by: string }>(guest.socket, S2C.kicked);
+    host.socket.emit(C2S.kick, { playerId: guest.id });
+    expect((await kicked).by).toBe('Host');
+    await waitUntil(() => host.state?.players.length === 1, 'the empty seat');
+
+    const again = await connect();
+    const ack = await ask<JoinAck>(again, C2S.joinRoom, {
+      code: host.state!.code,
+      name: 'Guest',
+      playerId: guest.id,
+    });
+    expect(ack.ok).toBe(false);
+  });
+
+  it('keeps their score on the board when removed mid-match', async () => {
+    const { host, guest } = await startedMatch();
+    const over = next<{ leaderboard: { playerId: string; left: boolean }[] }>(
+      host.socket,
+      S2C.gameOver,
+    );
+    host.socket.emit(C2S.kick, { playerId: guest.id });
+    const row = (await over).leaderboard.find((r) => r.playerId === guest.id)!;
+    expect(row.left).toBe(true);
+  });
+
+  it('lets only the host remove people, and never themselves', async () => {
+    const host = await join('Host');
+    const guest = await join('Guest', host.state!.code, host);
+
+    const err = next<{ message: string }>(guest.socket, S2C.error);
+    guest.socket.emit(C2S.kick, { playerId: host.id });
+    expect((await err).message).toMatch(/only the host/i);
+
+    host.socket.emit(C2S.kick, { playerId: host.id });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(host.state!.players).toHaveLength(2);
+  });
+});
+
+describe('starting with too many', () => {
+  it('refuses when the room holds more than the settings seat', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    await join('Guest', code, host);
+    await waitUntil(() => host.state?.players.length === 2, 'two players');
+
+    // Slip a third past the door, the way only a bug could.
+    const room = rooms.get(code)!;
+    const smuggled = newPlayer('smuggled', 'Smuggled', 'no-socket');
+    room.players.set(smuggled.id, smuggled);
+    room.order.push(smuggled.id);
+    room.config = { ...room.config, matchMinutes: 5, findSeconds: 90 };
+    expect(roomCapacity(room.config)).toBe(2);
+
+    const err = next<{ message: string }>(host.socket, S2C.error);
+    host.socket.emit(C2S.start);
+    expect((await err).message).toMatch(/only seat 2/i);
+    expect(host.state!.phase).toBe('lobby');
+  });
+});
+
+describe('refreshing in the lobby', () => {
+  it('keeps the seat so the host is not locked out of their own room', async () => {
+    const host = await join('Host');
+    const code = host.state!.code;
+    const guest = await join('Guest', code, host);
+
+    // A refresh: the socket drops, then comes back with the same id.
+    host.socket.disconnect();
+    await waitUntil(
+      () => !!guest.state?.players.find((p) => p.id === host.id && !p.connected),
+      'the host to show as away',
+    );
+    // The seat is held, not deleted — and the room is still standing.
+    expect(guest.state!.players).toHaveLength(2);
+    expect(rooms.has(code)).toBe(true);
+
+    const again = await connect();
+    let back: RoomState | null = null;
+    again.on(S2C.state, (s: RoomState) => (back = s));
+    const ack = await ask<JoinAck>(again, C2S.joinRoom, {
+      code,
+      name: 'Host',
+      playerId: host.id,
+    });
+
+    // Straight back in — no queue, and still the host.
+    expect(ack.ok).toBe(true);
+    expect(ack.pending).toBeUndefined();
+    expect(ack.playerId).toBe(host.id);
+    await waitUntil(() => back !== null, 'the seat back');
+    expect(back!.players.find((p) => p.id === host.id)!.isHost).toBe(true);
+    expect(back!.players).toHaveLength(2);
   });
 });

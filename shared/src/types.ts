@@ -89,6 +89,15 @@ export interface PuzzleView {
   softSeconds: number;
 }
 
+/** Somebody knocking at the door: they have asked to join but are not seated yet. */
+export interface PendingPlayer {
+  /** Identifies the request, not a player — they have no seat and no score yet. */
+  requestId: string;
+  name: string;
+  /** Epoch ms the request arrived, so the host can see who has been waiting longest. */
+  since: number;
+}
+
 /** Public room snapshot, broadcast to everyone in the room. */
 export interface RoomState {
   code: string;
@@ -111,6 +120,8 @@ export interface RoomState {
   lastReveal: { value: number; x: number; y: number } | null;
   /** Solo match against two bots, with the coach running. Changes pacing and penalties. */
   practice: boolean;
+  /** People waiting for the host to let them in. Names only — they hold no seat. */
+  pending: PendingPlayer[];
 }
 
 export interface TickPayload {
@@ -172,6 +183,21 @@ export interface JoinAck {
   error?: string;
   playerId?: string;
   code?: string;
+  /**
+   * Accepted into the queue rather than the room: the host has to let them in. `ok` is
+   * still true — nothing went wrong, they are just waiting.
+   */
+  pending?: boolean;
+  requestId?: string;
+}
+
+export interface KickedPayload {
+  /** Name of the host who did it, so the message isn't anonymous. */
+  by: string;
+}
+
+export interface DeclinedPayload {
+  by: string;
 }
 
 /* ---------- server -> client payloads ---------- */

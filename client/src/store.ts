@@ -43,6 +43,8 @@ interface AppState {
   hasLeft: boolean;
   /** A message to show on the home screen, e.g. the host closed the room. */
   notice: string | null;
+  /** Asked to join and waiting on the host. No seat, no board, no score yet. */
+  waitingFor: { code: string; name: string } | null;
   /** Puzzles solved since the current window opened — resets when the turn moves on. */
   streak: number;
   /** Practice only: newest first, what the bots have been up to. */
@@ -62,6 +64,7 @@ interface AppState {
   removeToken: (tokenId: string) => void;
   setHasLeft: (v: boolean) => void;
   setNotice: (v: string | null) => void;
+  setWaitingFor: (v: { code: string; name: string } | null) => void;
   bumpStreak: () => void;
   resetStreak: () => void;
   pushBotActivity: (a: BotActivityPayload) => void;
@@ -100,6 +103,7 @@ export const useStore = create<AppState>()((set, get) => ({
   gameOver: null,
   hasLeft: false,
   notice: null,
+  waitingFor: null,
   streak: 0,
   botFeed: [],
   toasts: [],
@@ -138,6 +142,7 @@ export const useStore = create<AppState>()((set, get) => ({
     }
     set({ notice });
   },
+  setWaitingFor: (waitingFor) => set({ waitingFor }),
   bumpStreak: () => set((s) => ({ streak: s.streak + 1 })),
   resetStreak: () => set({ streak: 0 }),
   pushBotActivity: (a) =>

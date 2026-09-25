@@ -17,6 +17,11 @@ export const C2S = {
   /** Host only: shut the room down for everybody. */
   closeRoom: 'room:close',
   leave: 'room:leave',
+  /** Host only: let a waiting player in, or turn them away. */
+  admit: 'room:admit',
+  decline: 'room:decline',
+  /** Host only: remove someone who is already in. */
+  kick: 'room:kick',
   /** Practice only: hold the clocks while the player reads a coach instruction. */
   coachPause: 'coach:pause',
 } as const;
@@ -35,6 +40,10 @@ export const S2C = {
   tick: 'game:tick',
   gameOver: 'game:over',
   roomClosed: 'room:closed',
+  /** Sent to the person waiting at the door, not to the room. */
+  admitted: 'room:admitted',
+  declined: 'room:declined',
+  kicked: 'room:kicked',
   /** Practice only: narration of what a bot just did. */
   botActivity: 'practice:bot',
   error: 'game:error',

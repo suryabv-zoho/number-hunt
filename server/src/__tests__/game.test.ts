@@ -41,7 +41,15 @@ function makeRoom(playerCount: number, config: Partial<Room['config']> = {}): Ro
     room.order.push(p.id);
   }
   room.hostId = 'p0';
-  room.config = { ...room.config, numberCount: 25, matchMinutes: 5, ...config };
+  // A short match with a long find window seats only two, and the start guard would
+  // reject a three-player test room. Fifteen-second rounds keep five minutes roomy.
+  room.config = {
+    ...room.config,
+    numberCount: 25,
+    matchMinutes: 5,
+    findSeconds: 15,
+    ...config,
+  };
   return room;
 }
 

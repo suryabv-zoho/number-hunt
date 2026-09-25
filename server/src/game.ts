@@ -6,6 +6,7 @@ import {
   MISSED_CALL_PENALTY,
   PICK_MS,
   PRACTICE_PICK_MS,
+  roomCapacity,
   S2C,
   WRAPUP_MS,
   WRONG_CLICK_LOCKOUT_MS,
@@ -228,6 +229,17 @@ export function stopTimers(room: Room) {
 export function startMatch(room: Room): string | null {
   if (room.phase !== 'lobby' && room.phase !== 'ended') return 'Match already running';
   if (connectedPlayers(room).length < 2) return 'Need at least 2 players to start';
+
+  // The door check should already have prevented this, but the settings decide the room
+  // size and both can move — so the last word is here, where it can't be worked around.
+  // Practice sets its own table: one human and two bots, by design.
+  if (!room.practice) {
+    const seats = roomCapacity(room.config);
+    const here = activePlayers(room).length;
+    if (here > seats) {
+      return `${here} players are here, and these settings only seat ${seats}`;
+    }
+  }
 
   // A rematch reuses the room, so anything a bot still had planned for the last match
   // must not fire into this one.

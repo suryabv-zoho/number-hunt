@@ -46,6 +46,12 @@ export const COACH_MAX_PAUSE_MS = 5 * 60_000;
 export const WRAPUP_MS = 20_000;
 
 /**
+ * How long a lobby seat is held for someone who has gone quiet. Long enough to cover a
+ * refresh or a tunnel, short enough that a closed tab frees the seat for someone else.
+ */
+export const LOBBY_SEAT_GRACE_MS = 45_000;
+
+/**
  * How long a room stays alive once it is down to fewer than two connected players.
  * Long enough to cover a page refresh or a lift-door moment, short enough that a
  * closed tab doesn't leave the last player waiting around.
