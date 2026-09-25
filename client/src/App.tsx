@@ -49,7 +49,7 @@ export default function App() {
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full flex-col">
         {!connected && (
-          <div className="animate-rise flex items-center justify-center gap-2 bg-accent-500 px-4 py-2 text-sm font-extrabold text-brand-900">
+          <div className="animate-rise flex items-center justify-center gap-2 bg-warning px-4 py-2 text-sm font-extrabold text-on-solid">
             <FontAwesomeIcon icon={iconOffline} />
             Reconnecting — your score is safe
           </div>

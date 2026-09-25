@@ -61,7 +61,7 @@ const SortableTile = memo(function SortableTile({
         'cursor-grab shadow-sm transition-[color,background-color,border-color,box-shadow] duration-150 active:cursor-grabbing',
         'xs:size-16 xs:text-[1.6rem] sm:size-[4.5rem] sm:text-[1.9rem]',
         correct
-          ? 'border-success bg-mint-100 text-success'
+          ? 'border-success bg-tint-success text-success'
           : 'border-border bg-surface-2 text-foreground hover:border-primary',
         isDragging && 'border-primary shadow-xl',
       )}
@@ -137,13 +137,13 @@ export default function PuzzlePanel() {
         <span
           className={cn(
             'rounded-full px-3 py-1 text-sm font-bold transition-colors duration-500',
-            decaying ? 'bg-mint-100 text-success' : 'bg-surface text-muted-foreground',
+            decaying ? 'bg-tint-success text-success' : 'bg-surface text-muted-foreground',
           )}
         >
           worth <b className="tnum">+{potential}</b>
         </span>
         {streak > 0 && (
-          <span className="animate-pop rounded-full bg-accent-100 px-3 py-1 text-sm font-bold text-warning">
+          <span className="animate-pop rounded-full bg-tint-warning px-3 py-1 text-sm font-bold text-warning">
             <b className="tnum">{streak}</b> solved this turn
           </span>
         )}
@@ -194,7 +194,7 @@ export default function PuzzlePanel() {
         onClick={check}
         className={cn(
           'h-12 w-full max-w-[20rem] text-base font-extrabold transition-colors',
-          solved && 'bg-success text-primary-foreground hover:bg-success/90',
+          solved && 'bg-success text-on-solid hover:bg-success/90',
         )}
       >
         {solved && <FontAwesomeIcon icon={iconFound} />}

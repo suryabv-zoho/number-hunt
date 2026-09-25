@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { storedTheme } from './themes.js';
 import type {
   BotActivityPayload,
   GameOverPayload,
@@ -51,6 +52,8 @@ interface AppState {
   speak: boolean;
   /** The browser refused to read a number out — worth telling the player. */
   speechBlocked: boolean;
+  /** Active colour theme id. The CSS is applied separately, in `themes.ts`. */
+  theme: string;
 
   setConnected: (v: boolean) => void;
   setIdentity: (playerId: string, name: string) => void;
@@ -72,6 +75,7 @@ interface AppState {
   setError: (e: string | null) => void;
   toggleSpeak: () => void;
   setSpeechBlocked: (v: boolean) => void;
+  setTheme: (id: string) => void;
   me: () => Player | null;
 }
 
@@ -102,6 +106,7 @@ export const useStore = create<AppState>()((set, get) => ({
   error: null,
   speak: localStorage.getItem('nh.speak') !== 'off',
   speechBlocked: false,
+  theme: storedTheme(),
 
   setConnected: (connected) => set({ connected }),
   setIdentity: (playerId, name) => {
@@ -156,6 +161,7 @@ export const useStore = create<AppState>()((set, get) => ({
   dropToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setError: (error) => set({ error }),
   setSpeechBlocked: (speechBlocked) => set({ speechBlocked }),
+  setTheme: (theme) => set({ theme }),
   toggleSpeak: () =>
     set((s) => {
       localStorage.setItem('nh.speak', s.speak ? 'off' : 'on');

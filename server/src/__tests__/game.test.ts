@@ -499,6 +499,36 @@ describe('ending', () => {
     expect(room.phase).toBe('await_call');
   });
 
+  it('ranks anyone who walked out below everyone who stayed', () => {
+    startMatch(room);
+    // The quitter has the best score, and must still not be crowned — nor sit above
+    // the players who saw the match out, which is what the winner line already implied.
+    player(room, 'p0').score = 90;
+    player(room, 'p0').left = true;
+    player(room, 'p1').score = -15;
+    player(room, 'p2').score = -20;
+
+    const rows = leaderboard(room);
+    expect(rows.map((r) => r.playerId)).toEqual(['p1', 'p2', 'p0']);
+    expect(rows[0].rank).toBe(1);
+    expect(rows[2].left).toBe(true);
+    expect(rows[2].rank).toBe(3);
+  });
+
+  it('never shares a rank between a leaver and someone who stayed on the same score', () => {
+    startMatch(room);
+    player(room, 'p0').score = 20;
+    player(room, 'p1').score = 20;
+    player(room, 'p1').left = true;
+    player(room, 'p2').score = 5;
+
+    const rows = leaderboard(room);
+    const stayed = rows.find((r) => r.playerId === 'p0')!;
+    const quit = rows.find((r) => r.playerId === 'p1')!;
+    expect(stayed.rank).toBe(1);
+    expect(quit.rank).not.toBe(stayed.rank);
+  });
+
   it('ranks ties by puzzles solved, then by fewer wrong clicks', () => {
     startMatch(room);
     player(room, 'p1').score = 20;

@@ -17,15 +17,18 @@ import {
   iconClose,
   iconCopy,
   iconHost,
+  iconGear,
   iconLeave,
   iconPlayers,
   iconSettings,
   iconStart,
 } from '@/icons';
+import SettingsDialog from '@/components/SettingsDialog';
 import { useStore } from '../store.js';
 import { closeRoom, leaveRoom, sendConfig, startMatch } from '../socket.js';
 
 export default function LobbyScreen() {
+  const [showSettings, setShowSettings] = useState(false);
   const room = useStore((s) => s.room)!;
   const playerId = useStore((s) => s.playerId);
   const [copied, setCopied] = useState(false);
@@ -54,42 +57,61 @@ export default function LobbyScreen() {
     <div className="flex flex-1 items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-5">
       <Card className="card-shadow animate-rise my-auto w-full max-w-[34rem] rounded-xl border-border bg-card">
         <CardContent className="space-y-5 pt-1 sm:space-y-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="text-xs tracking-widest text-muted-foreground uppercase">
+          <div>
+            {/* The code is deliberately huge and letter-spaced, so it gets a line to
+                itself. Sharing one with the buttons left ~320px of content fighting over
+                327px, and the code lost. The label keeps the button row company. */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs tracking-widest text-muted-foreground uppercase">
                 Room code
-              </div>
-              <button
-                onClick={copyCode}
-                className="group flex items-center gap-2 text-[2.2rem] leading-none font-extrabold tracking-[0.25em] text-primary transition-opacity hover:opacity-80 sm:gap-3 sm:text-[2.6rem] sm:tracking-[0.3em]"
-              >
-                {room.code}
-                <FontAwesomeIcon
-                  icon={iconCopy}
-                  className="text-base text-muted-foreground transition-colors group-hover:text-foreground"
-                />
-              </button>
-              <div className="h-4 text-xs text-success">
-                {copied && <span className="animate-fade">Copied to clipboard</span>}
+              </span>
+              <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                {/* Waiting for people is exactly when someone fiddles with their theme. */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Settings"
+                  className="size-9 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowSettings(true)}
+                >
+                  <FontAwesomeIcon icon={iconGear} />
+                </Button>
+
+                {/* The room is the host's to shut down; everyone else just walks out. */}
+                {isHost ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={closeRoom}
+                  >
+                    <FontAwesomeIcon icon={iconClose} />
+                    Close room
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={leaveRoom}>
+                    <FontAwesomeIcon icon={iconLeave} />
+                    Leave
+                  </Button>
+                )}
               </div>
             </div>
-            {/* The room is the host's to shut down; everyone else just walks out. */}
-            {isHost ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-destructive"
-                onClick={closeRoom}
-              >
-                <FontAwesomeIcon icon={iconClose} />
-                Close room
-              </Button>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={leaveRoom}>
-                <FontAwesomeIcon icon={iconLeave} />
-                Leave
-              </Button>
-            )}
+
+            <button
+              onClick={copyCode}
+              aria-label={`Room code ${room.code.split('').join(' ')}, tap to copy`}
+              className="group mt-0.5 flex w-full items-center gap-2 text-[2.2rem] leading-none font-extrabold tracking-[0.25em] text-primary transition-opacity hover:opacity-80 sm:gap-3 sm:text-[2.6rem] sm:tracking-[0.3em]"
+            >
+              {room.code}
+              <FontAwesomeIcon
+                icon={iconCopy}
+                className="text-base text-muted-foreground transition-colors group-hover:text-foreground"
+              />
+            </button>
+
+            <div className="h-4 text-xs text-success">
+              {copied && <span className="animate-fade">Copied to clipboard</span>}
+            </div>
           </div>
 
           <Separator />
@@ -117,7 +139,7 @@ export default function LobbyScreen() {
                     )}
                   </span>
                   {p.isHost && (
-                    <Badge className="gap-1.5 bg-accent-500 text-brand-900 hover:bg-accent-500">
+                    <Badge className="gap-1.5 bg-warning text-on-solid hover:bg-warning">
                       <FontAwesomeIcon icon={iconHost} className="text-[0.65rem]" />
                       Host
                     </Badge>
@@ -236,7 +258,9 @@ export default function LobbyScreen() {
 
           {isHost ? (
             <Button
-              className="h-13 w-full text-lg font-extrabold"
+              // The waiting label is long, and the button inherits `whitespace-nowrap`
+              // from the shared variant — on a 320px screen it ran past its own edge.
+              className="h-auto min-h-13 w-full py-3 text-base font-extrabold whitespace-normal sm:text-lg"
               disabled={!ready}
               onClick={startMatch}
             >
@@ -250,6 +274,8 @@ export default function LobbyScreen() {
           )}
         </CardContent>
       </Card>
+
+      <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
     </div>
   );
 }

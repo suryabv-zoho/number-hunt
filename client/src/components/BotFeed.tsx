@@ -10,6 +10,7 @@ import {
   iconWatch,
   iconWrong,
   iconBlocked,
+  iconThinking,
 } from '@/icons';
 import { useStore } from '../store.js';
 
@@ -21,7 +22,7 @@ import { useStore } from '../store.js';
  * On a phone only the newest line shows, because the board needs the height more.
  */
 const LOOK: Record<BotActivityKind, { icon: IconDefinition; tone: string }> = {
-  thinking: { icon: iconCall, tone: 'text-muted-foreground' },
+  thinking: { icon: iconThinking, tone: 'text-muted-foreground' },
   called: { icon: iconCall, tone: 'text-primary' },
   scanning: { icon: iconHunt, tone: 'text-muted-foreground' },
   found: { icon: iconFound, tone: 'text-success' },

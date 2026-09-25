@@ -47,4 +47,7 @@ export {
   faArrowLeft as iconBack,
   faChevronDown as iconCollapse,
   faPause as iconPaused,
+  faGear as iconGear,
+  faPalette as iconTheme,
+  faEllipsis as iconThinking,
 } from '@fortawesome/free-solid-svg-icons';

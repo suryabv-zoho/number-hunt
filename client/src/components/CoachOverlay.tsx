@@ -161,10 +161,10 @@ export default function CoachOverlay() {
           className="animate-rise card-shadow pointer-events-auto flex max-h-[58vh] w-full max-w-[32rem] flex-col rounded-xl border-2 border-primary bg-card p-3.5 sm:max-h-[70vh] sm:p-5"
         >
           <div className="flex shrink-0 items-center gap-2.5">
-            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground sm:size-8">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary-fill text-primary-fill-foreground sm:size-8">
               <FontAwesomeIcon icon={iconTeach} className="text-xs sm:text-sm" />
             </span>
-            <h3 className="flex-1 text-base leading-tight font-extrabold sm:text-xl">
+            <h3 className="min-w-0 flex-1 text-base leading-tight font-extrabold sm:text-xl">
               {step.title}
             </h3>
             <span className="shrink-0 text-xs font-bold text-muted-foreground tnum">

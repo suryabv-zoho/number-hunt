@@ -4,6 +4,7 @@ import { BOARD_W, BOARD_H, hitTest } from '@game/shared';
 import type { NumberToken, RoomState } from '@game/shared';
 import { Button } from '@/components/ui/button';
 import { cn } from 'cn';
+import { useStore } from '../store.js';
 import { iconZoomIn, iconZoomOut, iconFit } from '@/icons';
 
 const REVEAL_MS = 3200;
@@ -14,6 +15,24 @@ const MAX_ZOOM = 6;
  * A finger always slides a little, so touch gets a much bigger allowance than a mouse —
  * 8px was tight enough that real taps were being swallowed as pans.
  */
+/**
+ * The canvas paints with literal colours, so it has to go and read the theme itself.
+ * Resolved once per render pass rather than per token: `getComputedStyle` forces a
+ * style flush, and doing that 150 times a frame would cost more than the drawing.
+ */
+function themeColours() {
+  const cs = getComputedStyle(document.documentElement);
+  const get = (name: string, fallback: string) =>
+    cs.getPropertyValue(name).trim() || fallback;
+  return {
+    page: get('--background', '#15122a'),
+    board: get('--card', '#1e1a3c'),
+    pick: get('--primary-fill', '#6c47f5'),
+    pickInk: get('--primary-fill-foreground', '#ffffff'),
+    reveal: get('--warning', '#ffd166'),
+  };
+}
+
 const TAP_SLOP_MOUSE = 6;
 const TAP_SLOP_TOUCH = 16;
 
@@ -68,6 +87,7 @@ function baseZoom(w: number, h: number): number {
 function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const theme = useStore((s) => s.theme);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [view, setView] = useState<View>(FIT);
@@ -240,9 +260,11 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
       const viewR = viewL + size.w / scale;
       const viewB = viewT + size.h / scale;
 
+      const paint = themeColours();
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size.w, size.h);
-      ctx.fillStyle = '#131029';
+      ctx.fillStyle = paint.page;
       ctx.fillRect(0, 0, size.w, size.h);
 
       ctx.save();
@@ -250,7 +272,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
       ctx.scale(scale, scale);
 
       // Board surface, lifted just enough off the page to read as a playfield.
-      ctx.fillStyle = '#1a1638';
+      ctx.fillStyle = paint.board;
       ctx.fillRect(0, 0, BOARD_W, BOARD_H);
 
       // One path for every grid line, and only the lines in view.
@@ -325,9 +347,9 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
         const r = t.fontSize * 0.45;
         ctx.beginPath();
         ctx.roundRect(-w / 2 - padX, -t.fontSize / 2 - padY, w + padX * 2, t.fontSize + padY * 2, r);
-        ctx.fillStyle = '#8466ff';
+        ctx.fillStyle = paint.pick;
         ctx.fill();
-        ctx.fillStyle = '#140f30';
+        ctx.fillStyle = paint.pickInk;
         ctx.fillText(label, 0, 0);
         ctx.restore();
       }
@@ -342,13 +364,13 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
           const p = age / REVEAL_MS;
           ctx.save();
           ctx.globalAlpha = Math.max(0, 1 - p);
-          ctx.strokeStyle = '#ffc94d';
+          ctx.strokeStyle = paint.reveal;
           ctx.lineWidth = 6;
           ctx.beginPath();
           ctx.arc(reveal.x, reveal.y, 24 + p * 110, 0, Math.PI * 2);
           ctx.stroke();
           ctx.font = '800 42px Nunito, ui-rounded, system-ui, sans-serif';
-          ctx.fillStyle = '#ffc94d';
+          ctx.fillStyle = paint.reveal;
           ctx.fillText(String(reveal.value), reveal.x, reveal.y - 62);
           ctx.restore();
         }
@@ -360,7 +382,10 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
 
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [tokens, size, revealKey, locked, hoverId, geometry]);
+    // `theme` is in here for exactly one reason: the canvas samples the CSS variables
+    // when it paints, so a theme change has to force a repaint. Nothing else in this
+    // effect reads it.
+  }, [tokens, size, revealKey, locked, hoverId, geometry, theme]);
 
   const interactive = (mode === 'pick' || mode === 'hunt') && !locked;
 
@@ -536,7 +561,7 @@ function BoardCanvas({ tokens, reveal, mode, locked, onPick }: Props) {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-2">
         {mode === 'pick' ? (
-          <span className="animate-rise rounded-full bg-primary px-4 py-2 text-center text-sm font-extrabold text-primary-foreground shadow-lg">
+          <span className="animate-rise rounded-full bg-primary-fill px-4 py-2 text-center text-sm font-extrabold text-primary-fill-foreground shadow-lg">
             Tap any number to call it
           </span>
         ) : pannable ? (

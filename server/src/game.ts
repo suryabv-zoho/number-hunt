@@ -598,6 +598,12 @@ export function leaderboard(room: Room): LeaderboardRow[] {
 
   rows.sort(
     (a, b) =>
+      // Anyone who walked out ranks below everyone who saw it through, whatever the
+      // scores. The rule that a quitter isn't crowned already existed, but it only
+      // applied to the winner line — so the banner could congratulate someone on -15
+      // while the table above it showed a departed player 1st on 9. One sort, and the
+      // banner, the medal and the table finally agree.
+      Number(a.left) - Number(b.left) ||
       b.score - a.score ||
       b.puzzlesSolved - a.puzzlesSolved ||
       a.wrongClicks - b.wrongClicks ||
@@ -606,7 +612,9 @@ export function leaderboard(room: Room): LeaderboardRow[] {
 
   rows.forEach((row, i) => {
     const prev = rows[i - 1];
-    row.rank = prev && prev.score === row.score ? prev.rank : i + 1;
+    // A leaver never shares a rank with someone who stayed, even on the same score.
+    const tied = prev && prev.score === row.score && prev.left === row.left;
+    row.rank = tied ? prev.rank : i + 1;
   });
   return rows;
 }

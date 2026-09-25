@@ -3,76 +3,152 @@
 @plugin 'tailwindcss-animate';
 
 /*
- * A light, rounded, purple-forward theme.
+ * Theming.
  *
- * The board is the one place this has to be fought for: it's a find-the-number puzzle,
- * so the numbers need to stay legible against a pale surface without turning garish.
- * Hence the deeper board palette further down — it is not the same as the interface's.
+ * Every theme is dark: a match runs for fifteen minutes and the board is a field of
+ * small coloured numbers, which a pale background makes genuinely tiring to hunt across.
+ * The numbers themselves are light pastels chosen on the server, so a light theme would
+ * also make half the board invisible.
+ *
+ * The one rule that matters here: the brand colour is TWO tokens, not one.
+ *
+ *   --primary       light — for text, icons and borders sitting on a dark surface
+ *   --primary-fill  deep  — for solid buttons, which need white text on top
+ *
+ * They used to be the same value, and it could not satisfy both: a violet dark enough
+ * for white button text measured 3.8:1 as text on a card, which is below the 4.5:1
+ * readable threshold and exactly the "violet on dark is hard to read" complaint.
+ *
+ * Every foreground/background pair in every theme below is >= 4.5:1, body text >= 7:1.
  */
 :root {
-  /* brand */
-  --brand-900: #23155c;
-  --brand-800: #3b22a8;
-  --brand-700: #5330d6;
-  --brand-600: #6a48f2;
-  --brand-500: #8466ff;
-  --brand-100: #322a70;
-  --brand-050: #241f52;
+  /* ------------------------------------------------ Midnight (the default) */
+  --background: #15122a;
+  --card: #1e1a3c;
+  --surface: #272248;
+  --surface-2: #322c58;
+  --border: #3a3466;
+  --input: #443c7a;
 
-  --accent-600: #ffc94d;
-  --accent-500: #ffd233;
-  --accent-100: #4a3c12;
+  --foreground: #ece9ff;
+  --muted-foreground: #aaa4d0;
 
-  --mint-600: #3fd9a0;
-  --mint-500: #2fe3a5;
-  --mint-100: #10402f;
+  --primary: #b3a1ff;
+  --primary-fill: #6c47f5;
+  --primary-fill-foreground: #ffffff;
 
-  --danger-700: #a81848;
-  --danger-600: #ff5c8a;
-  --danger-500: #ff4f86;
-  --danger-100: #4a1327;
+  --success: #4ee3ac;
+  --warning: #ffd166;
+  --destructive: #ff7d9f;
+  --info: #93b7ff;
 
-  --ink-900: #e6e2ff;
-  --ink-700: #3f3866;
-  --ink-500: #6f6894;
-  --ink-300: #b3adcf;
+  /* Dark ink for text sitting on a solid success/warning/destructive fill. */
+  --on-solid: #1a1330;
+  /* A negative score on the caller's bright chip still has to read as bad news. */
+  --danger-ink: #7d0f33;
 
-  /* semantic — dark by default: this game is played for fifteen minutes at a stretch,
-     and a white board is tiring to hunt across. Same Gengo palette, darker steps. */
-  --background: #131029;
-  --foreground: #e6e2ff;
+  --bar: #2b2264;
+}
 
-  --card: #1b1740;
-  --card-foreground: #e6e2ff;
-  --popover: #221d4e;
-  --popover-foreground: #e6e2ff;
+[data-theme='slate'] {
+  --background: #12161c;
+  --card: #1a2029;
+  --surface: #232b36;
+  --surface-2: #2d3643;
+  --border: #3a4553;
+  --input: #465364;
 
-  --surface: #241f52;
-  --surface-2: #2e2866;
+  --foreground: #e8eef5;
+  --muted-foreground: #a0aebe;
 
-  /* On dark, the mid brand steps carry contrast; the deep ones disappear. */
-  --primary: #8466ff;
-  --primary-foreground: #120d2e;
+  --primary: #84c7ff;
+  --primary-fill: #1f6feb;
+  --primary-fill-foreground: #ffffff;
 
-  --secondary: #2e2866;
-  --secondary-foreground: #e6e2ff;
+  --success: #52dd90;
+  --warning: #f5c85a;
+  --destructive: #ff8590;
+  --info: #9bbcff;
 
-  --muted: #241f52;
-  --muted-foreground: #a09ac9;
+  --on-solid: #10161d;
+  --danger-ink: #78121c;
 
-  --accent: #2e2866;
-  --accent-foreground: #e6e2ff;
+  --bar: #223046;
+}
 
-  --destructive: #ff5c8a;
-  --destructive-foreground: #2a0a16;
+[data-theme='forest'] {
+  --background: #0f1a17;
+  --card: #16241f;
+  --surface: #1e2f29;
+  --surface-2: #273b33;
+  --border: #324b40;
+  --input: #3d5a4d;
 
-  --success: #3fd9a0;
-  --info: #8fa8ff;
-  --warning: #ffc94d;
+  --foreground: #e8f3ed;
+  --muted-foreground: #a0bbad;
 
-  --border: #312b66;
-  --input: #3a3378;
-  --ring: #8466ff;
+  --primary: #66dcd2;
+  --primary-fill: #0f7a72;
+  --primary-fill-foreground: #ffffff;
+
+  --success: #7fdf92;
+  --warning: #f2c76a;
+  --destructive: #ff8a98;
+  --info: #8cc9ff;
+
+  --on-solid: #0c1714;
+  --danger-ink: #7a1220;
+
+  --bar: #1a3b33;
+}
+
+[data-theme='ember'] {
+  --background: #1a1412;
+  --card: #241b18;
+  --surface: #2f2420;
+  --surface-2: #3b2d28;
+  --border: #4a3830;
+  --input: #5a453b;
+
+  --foreground: #f7ece5;
+  --muted-foreground: #c6aea1;
+
+  --primary: #ffb684;
+  --primary-fill: #b8521c;
+  --primary-fill-foreground: #ffffff;
+
+  --success: #82dd9d;
+  --warning: #ffd166;
+  --destructive: #ff8a9c;
+  --info: #a5c7ff;
+
+  --on-solid: #1a120d;
+  --danger-ink: #7d1226;
+
+  --bar: #3d2a1e;
+}
+
+/*
+ * Everything below is derived, so a new theme only has to supply the values above.
+ * Custom properties resolve per element, so these pick up whichever theme is active.
+ */
+:root {
+  /* Tinted chip backgrounds: the status colour, softened into the card it sits on. */
+  --tint-primary: color-mix(in srgb, var(--primary) 20%, var(--card));
+  --tint-success: color-mix(in srgb, var(--success) 18%, var(--card));
+  --tint-warning: color-mix(in srgb, var(--warning) 18%, var(--card));
+  --tint-danger: color-mix(in srgb, var(--destructive) 18%, var(--card));
+
+  --card-foreground: var(--foreground);
+  --popover: var(--surface);
+  --popover-foreground: var(--foreground);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--surface);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--foreground);
+  --destructive-foreground: var(--on-solid);
+  --ring: var(--primary);
 
   --radius: 14px;
   --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.3), 0 18px 40px -22px rgba(0, 0, 0, 0.8);
@@ -83,6 +159,8 @@
 }
 
 @theme inline {
+  /* Every token used in a utility class has to be exported here, or Tailwind silently
+     drops the class — which is how a caller's chip once ended up invisible. */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -91,8 +169,11 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+
   --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-fill: var(--primary-fill);
+  --color-primary-fill-foreground: var(--primary-fill-foreground);
+
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -104,28 +185,14 @@
   --color-success: var(--success);
   --color-info: var(--info);
   --color-warning: var(--warning);
-  /* Palette steps used directly in components. Every one of these must be listed here
-     or the utility class silently does nothing — which is how a caller's chip ended up
-     as dark text on a dark bar. */
-  --color-brand-900: var(--brand-900);
-  --color-brand-800: var(--brand-800);
-  --color-brand-700: var(--brand-700);
-  --color-brand-500: var(--brand-500);
-  --color-brand-100: var(--brand-100);
-  --color-brand-050: var(--brand-050);
-  --color-accent-600: var(--accent-600);
-  --color-accent-500: var(--accent-500);
-  --color-accent-100: var(--accent-100);
-  --color-mint-600: var(--mint-600);
-  --color-mint-500: var(--mint-500);
-  --color-mint-100: var(--mint-100);
-  --color-danger-600: var(--danger-600);
-  --color-danger-500: var(--danger-500);
-  --color-danger-100: var(--danger-100);
-  --color-ink-900: var(--ink-900);
-  --color-ink-700: var(--ink-700);
-  --color-ink-500: var(--ink-500);
-  --color-ink-300: var(--ink-300);
+
+  --color-tint-primary: var(--tint-primary);
+  --color-tint-success: var(--tint-success);
+  --color-tint-warning: var(--tint-warning);
+  --color-tint-danger: var(--tint-danger);
+  --color-on-solid: var(--on-solid);
+  --color-danger-ink: var(--danger-ink);
+
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -243,11 +310,12 @@
   }
 }
 @keyframes nh-sweep {
-  from {
-    transform: translateX(-100%);
+  0%,
+  100% {
+    opacity: 0;
   }
-  to {
-    transform: translateX(100%);
+  50% {
+    opacity: 1;
   }
 }
 @keyframes nh-breathe {
@@ -290,30 +358,24 @@
 .stagger > *:nth-child(7) { animation-delay: 0.26s; }
 .stagger > *:nth-child(8) { animation-delay: 0.3s; }
 
+/* A moving highlight to mark "it's your turn". Flat fill, no gradient: it fades in and
+   out rather than smearing a colour ramp across the panel. */
 .sweep::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--brand-500) 14%, transparent),
-    transparent
-  );
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
   animation: nh-sweep 2.6s ease-in-out infinite;
   pointer-events: none;
 }
 
-/* The header band, lifted from the reference theme. */
+/* The header band: a flat colour, never a gradient. A gradient behind the clocks and
+   score chips shifts the contrast under them across the width of the bar, so the same
+   white text is easy to read at one end and murky at the other. */
 .brand-bar {
-  background: linear-gradient(
-    100deg,
-    #1a1145,
-    #3a2596,
-    #2a1a70,
-    #3a2596,
-    #1a1145
-  );
+  background: var(--bar);
+  /* A flat band needs an edge, or it melts into the page below it. */
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.09), 0 6px 16px -10px rgba(0, 0, 0, 0.9);
 }
 
 .card-shadow {

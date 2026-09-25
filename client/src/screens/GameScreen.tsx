@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import { iconCall, iconFound, iconHourglass, iconWaiting } from '@/icons';
+import { nameList } from '@/lib/utils';
 import { useStore } from '../store.js';
 import { clickBoard } from '../socket.js';
 import { formatClock, usePassed } from '../hooks.js';
@@ -28,16 +29,26 @@ export default function GameScreen() {
   if (puzzle) {
     main = <PuzzlePanel />;
   } else if (room.phase === 'wrapup') {
+    // Anyone who opened a puzzle before the whistle gets to finish it. This screen is
+    // what the people who *weren't* mid-puzzle see, so it has to say whose puzzle we're
+    // waiting on and why — otherwise it's a countdown with nothing behind it.
+    const finishing = room.players.filter((p) => room.solving.includes(p.id) && !p.left);
     main = (
       <Notice
         icon={iconHourglass}
         title="Match over"
         body={
-          room.solving.length > 0
-            ? `Waiting on ${room.solving.length} last puzzle${room.solving.length > 1 ? 's' : ''}…`
-            : 'Tallying the scores…'
+          finishing.length === 0
+            ? 'Adding up the scores…'
+            : finishing.length === 1
+              ? `${finishing[0].name} opened a puzzle just before the whistle and still has a moment to finish it. If they solve it, those points count.`
+              : `${nameList(finishing.map((p) => p.name))} opened puzzles just before the whistle and still have a moment to finish them. Anything they solve still counts.`
         }
-        sub={formatClock(phaseLeftMs)}
+        sub={
+          finishing.length > 0
+            ? `Leaderboard in ${formatClock(phaseLeftMs)}`
+            : formatClock(phaseLeftMs)
+        }
       />
     );
   } else if (room.phase === 'hunting' && isCaller) {

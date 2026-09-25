@@ -45,12 +45,12 @@ export default function StatusStrip() {
         </span>
 
         {lockLeft > 0 ? (
-          <span className="flex items-center gap-2 rounded-full bg-danger-100 px-3 py-1 text-sm font-bold text-destructive">
+          <span className="flex items-center gap-2 rounded-full bg-tint-danger px-3 py-1 text-sm font-bold text-destructive">
             <FontAwesomeIcon icon={iconWrong} />
             locked {Math.ceil(lockLeft / 1000)}s
           </span>
         ) : iFound ? (
-          <span className="flex items-center gap-2 rounded-full bg-mint-100 px-3 py-1 text-sm font-bold text-success">
+          <span className="flex items-center gap-2 rounded-full bg-tint-success px-3 py-1 text-sm font-bold text-success">
             <FontAwesomeIcon icon={iconFound} />
             you found it
           </span>

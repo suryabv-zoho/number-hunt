@@ -10,6 +10,7 @@ import {
   iconCall,
   iconCreate,
   iconFound,
+  iconGear,
   iconHunt,
   iconInfo,
   iconJoin,
@@ -18,6 +19,7 @@ import {
   iconTeach,
   iconWrong,
 } from '@/icons';
+import SettingsDialog from '@/components/SettingsDialog';
 import { useStore } from '../store.js';
 import { createRoom, joinRoom, startPractice } from '../socket.js';
 
@@ -53,6 +55,7 @@ export default function HomeScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showRules, setShowRules] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const nameRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
@@ -94,7 +97,7 @@ export default function HomeScreen() {
       <Card className="card-shadow animate-rise my-auto w-full max-w-[26rem] rounded-xl border-border bg-card">
         <CardContent className="space-y-5 pt-1">
           {notice && (
-            <div className="animate-pop flex items-start gap-2.5 rounded-lg border border-warning/35 bg-accent-100 px-3.5 py-3 text-sm font-bold text-warning">
+            <div className="animate-pop flex items-start gap-2.5 rounded-lg border border-warning/35 bg-tint-warning px-3.5 py-3 text-sm font-bold text-warning">
               <FontAwesomeIcon icon={iconInfo} className="mt-0.5" />
               <span className="flex-1">{notice}</span>
               <button
@@ -107,13 +110,23 @@ export default function HomeScreen() {
             </div>
           )}
 
-          <div>
-            <h1 className="text-4xl leading-none font-extrabold tracking-tight sm:text-[2.6rem]">
-              Number<span className="text-primary">Hunt</span>
-            </h1>
-            <p className="mt-2 text-base text-muted-foreground">
-              Call a number. Everyone hunts it down. Solve the tile puzzle to score.
-            </p>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-[2rem] leading-none font-extrabold tracking-tight xs:text-4xl sm:text-[2.6rem]">
+                Number<span className="text-primary">Hunt</span>
+              </h1>
+              <p className="mt-2 text-base text-muted-foreground">
+                Call a number. Everyone hunts it down. Solve the tile puzzle to score.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              onClick={() => setShowSettings(true)}
+              aria-label="Settings"
+              className="-mr-2 size-10 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground"
+            >
+              <FontAwesomeIcon icon={iconGear} />
+            </Button>
           </div>
 
           {/* Keyed so each step plays its own entrance rather than swapping in place. */}
@@ -237,7 +250,7 @@ export default function HomeScreen() {
           </div>
 
           {error && (
-            <p className="animate-rise flex items-center gap-2 rounded-lg bg-danger-100 px-3 py-2 text-sm font-bold text-destructive">
+            <p className="animate-rise flex items-center gap-2 rounded-lg bg-tint-danger px-3 py-2 text-sm font-bold text-destructive">
               <FontAwesomeIcon icon={iconWrong} />
               {error}
             </p>
@@ -274,6 +287,8 @@ export default function HomeScreen() {
           </div>
         </CardContent>
       </Card>
+
+      <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
     </div>
   );
 }

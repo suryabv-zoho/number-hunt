@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from 'cn';
+import { nameList } from '@/lib/utils';
 import {
   iconAccept,
   iconBot,
@@ -38,6 +39,13 @@ const PODIUM = [
   { icon: iconMedal, cls: 'text-[#c07a42]' },
 ];
 
+/** 1st, 2nd, 3rd, 4th… including the 11th/12th/13th exceptions. */
+function ordinal(n: number): string {
+  const rest = n % 100;
+  if (rest >= 11 && rest <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
 const END_TITLE = {
   board_cleared: 'Board cleared',
   time_up: "Time's up",
@@ -54,9 +62,18 @@ export default function ResultsScreen() {
   const iAccepted = playerId ? room.readyForNext.includes(playerId) : false;
 
   const rows = gameOver?.leaderboard ?? [];
-  // A walk-out shouldn't be crowned, even if their score held up.
-  const winner = rows.find((r) => !r.left);
   const reason = gameOver?.reason ?? 'time_up';
+
+  // Equal scores share a rank, so the top of the board can be a tie. Crowning whoever
+  // happened to sort first reads as a bug to the player who matched them.
+  const stayed = rows.filter((r) => r.left !== true);
+  const topRank = stayed[0]?.rank;
+  const winners = stayed.filter((r) => r.rank === topRank);
+  const winner = winners[0];
+
+  const me = rows.find((r) => r.playerId === playerId);
+  const iWon = !!me && !me.left && me.rank === topRank;
+  const sharedRank = !!me && rows.filter((r) => r.rank === me.rank).length > 1;
 
   // The host can't drag people into another match single-handedly.
   const canRestart = room.readyForNext.some((id) => id !== hostId);
@@ -73,11 +90,63 @@ export default function ResultsScreen() {
             <h1 className="text-2xl font-extrabold sm:text-3xl">{END_TITLE[reason]}</h1>
             {winner && (
               <p className="text-base text-muted-foreground">
-                <b className="text-foreground">{winner.name}</b> takes it with{' '}
+                <b className="text-foreground">{nameList(winners.map((w) => w.name))}</b>{' '}
+                {winners.length > 1 ? 'tie on' : 'takes it with'}{' '}
                 <b className="text-primary tnum">{winner.score}</b> points
               </p>
             )}
+            <p className="text-sm text-muted-foreground">
+              {rows.length} player{rows.length === 1 ? '' : 's'} ·{' '}
+              {room.roundNumber} round{room.roundNumber === 1 ? '' : 's'}
+            </p>
           </div>
+
+          {/* Where *you* came. The table below answers it too, but only after you've
+              found your own name in it — which is the first thing anyone looks for. */}
+          {me && (
+            <div
+              className={cn(
+                'animate-pop flex items-center gap-3.5 rounded-lg border-2 p-3.5 sm:p-4',
+                iWon ? 'border-warning bg-tint-warning' : 'border-primary bg-tint-primary',
+              )}
+            >
+              <span
+                className={cn(
+                  'grid size-12 shrink-0 place-items-center rounded-full text-xl font-extrabold tnum',
+                  iWon ? 'bg-warning text-on-solid' : 'bg-surface-2 text-primary',
+                )}
+              >
+                {me.rank <= 3 && !me.left ? (
+                  <FontAwesomeIcon
+                    icon={PODIUM[me.rank - 1].icon}
+                    // The winner's circle is already gold, so a gold trophy on it
+                    // disappears. Silver and bronze keep their own colour.
+                    className={iWon ? 'text-on-solid' : PODIUM[me.rank - 1].cls}
+                  />
+                ) : (
+                  me.rank
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-extrabold sm:text-xl">
+                  {me.left
+                    ? `You left — ${ordinal(me.rank)} of ${rows.length}`
+                    : sharedRank
+                      ? `You tied for ${ordinal(me.rank)} of ${rows.length}`
+                      : iWon
+                        ? `You won — ${ordinal(me.rank)} of ${rows.length}`
+                        : `You finished ${ordinal(me.rank)} of ${rows.length}`}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  <b className={cn('tnum', me.score < 0 ? 'text-destructive' : 'text-foreground')}>
+                    {me.score}
+                  </b>{' '}
+                  points · {me.puzzlesSolved} puzzle{me.puzzlesSolved === 1 ? '' : 's'} solved ·{' '}
+                  {me.numbersFound} found
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* With a big room this list gets long, so it scrolls inside the card. */}
           <div className="max-h-[45vh] overflow-y-auto rounded-lg border border-border [scrollbar-width:thin]">

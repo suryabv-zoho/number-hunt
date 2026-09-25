@@ -4,9 +4,9 @@ import { iconFound, iconInfo, iconWrong } from '@/icons';
 import { useStore } from '../store.js';
 
 const TONE = {
-  good: { cls: 'bg-mint-100 text-success', icon: iconFound },
-  bad: { cls: 'bg-danger-100 text-destructive', icon: iconWrong },
-  info: { cls: 'bg-brand-100 text-foreground', icon: iconInfo },
+  good: { cls: 'bg-tint-success text-success', icon: iconFound },
+  bad: { cls: 'bg-tint-danger text-destructive', icon: iconWrong },
+  info: { cls: 'bg-tint-primary text-foreground', icon: iconInfo },
 } as const;
 
 export default function Toasts() {
